@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: hsl(0, 0%, 4%);
+  --color-surface: hsl(0, 0%, 8%);
+  --color-text: hsl(0, 0%, 96%);
+  --color-muted: hsl(0, 0%, 60%);
+  --color-stroke: hsl(0, 0%, 14%);
+  
+  --font-body: 'Inter', sans-serif;
+  --font-display: 'Instrument Serif', serif;
+}
+
+@layer base {
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-body);
+  }
+}
+
+@layer utilities {
+  .voice-gradient {
+    background: linear-gradient(90deg, #ffffff, #ffd6f4, #ff9bd8, #ffffff);
+  }
+  .voice-gradient-text {
+    background: linear-gradient(90deg, #ffffff, #ffd6f4, #ff9bd8, #ffffff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .voice-gradient-border {
+    border-color: transparent;
+    background-image: linear-gradient(var(--color-surface), var(--color-surface)), linear-gradient(90deg, #ffffff, #ffd6f4, #ff9bd8, #ffffff);
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+  }
+}
+
+@keyframes voice-wave {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.2;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.4;
+  }
+}
+
+.animate-voice-wave {
+  animation: voice-wave 8s infinite ease-in-out;
+}
