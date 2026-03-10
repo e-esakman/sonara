@@ -226,13 +226,22 @@ const ReadingViewer = () => {
 
                             {/* Controls */}
                             <div className="relative z-10 flex justify-center items-center gap-4 sm:gap-6">
-                                <button
-                                    onClick={playCorrect}
-                                    className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-all duration-200 hover:scale-105"
-                                    title="Listen to passage"
-                                >
-                                    <Icon icon="solar:volume-loud-linear" width="22" />
-                                </button>
+                                <div className="flex gap-2">
+                                    <button
+                                        onClick={playCorrect}
+                                        className="w-12 h-12 flex items-center justify-center rounded-l-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-all duration-200 hover:scale-105"
+                                        title="Listen to passage"
+                                    >
+                                        <Icon icon="solar:volume-loud-linear" width="22" />
+                                    </button>
+                                    <button
+                                        onClick={stopSpeaking}
+                                        className="w-12 h-12 flex items-center justify-center rounded-r-full bg-neutral-100 text-neutral-500 hover:bg-rose-50 hover:text-rose-600 transition-all hover:scale-105"
+                                        title="Stop reading aloud"
+                                    >
+                                        <Icon icon="solar:stop-circle-linear" width="22" />
+                                    </button>
+                                </div>
 
                                 <button
                                     onMouseDown={handleStartRecording}
