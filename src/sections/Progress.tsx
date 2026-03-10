@@ -1,6 +1,27 @@
+import { useState, useEffect } from 'react';
 import { Icon } from '@iconify/react';
+import { getProgress } from '../services/progressService';
+import type { ProgressData } from '../services/progressService';
 
 const Progress = () => {
+    const [progress, setProgress] = useState<ProgressData | null>(null);
+
+    useEffect(() => {
+        const fetchProgress = async () => {
+            const data = await getProgress();
+            if (data) {
+                setProgress(data);
+            }
+        };
+        fetchProgress();
+    }, []);
+
+    // Fallback if not loaded
+    const pScore = progress?.pronunciationScore || 92;
+    const fScore = progress?.fluencyScore || 88;
+    const streak = progress?.streak || 14;
+    const wordsPracticed = progress?.wordsPracticed || '1.2k';
+
     return (
         <section id="progress" className="w-full py-32 px-6">
             <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12">
@@ -17,7 +38,7 @@ const Progress = () => {
                                 Pronunciation
                             </span>
                             <div className="flex items-end gap-2">
-                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">92</span>
+                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">{pScore}</span>
                                 <span className="text-sm text-emerald-500 font-medium mb-1 font-sans">+4%</span>
                             </div>
                         </div>
@@ -28,7 +49,7 @@ const Progress = () => {
                                 Fluency
                             </span>
                             <div className="flex items-end gap-2">
-                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">88</span>
+                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">{fScore}</span>
                                 <span className="text-sm text-emerald-500 font-medium mb-1 font-sans">+2%</span>
                             </div>
                         </div>
@@ -39,7 +60,7 @@ const Progress = () => {
                                 Daily Streak
                             </span>
                             <div className="flex items-end gap-2">
-                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">14</span>
+                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">{streak}</span>
                                 <span className="text-sm text-neutral-400 font-medium mb-1 font-sans">days</span>
                             </div>
                         </div>
@@ -50,7 +71,7 @@ const Progress = () => {
                                 Words Practiced
                             </span>
                             <div className="flex items-end gap-2">
-                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">1.2k</span>
+                                <span className="text-4xl tracking-tight text-[#111] font-normal font-dm-sans">{wordsPracticed}</span>
                             </div>
                         </div>
                     </div>
