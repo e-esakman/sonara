@@ -3,10 +3,13 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 // Extend window object to include the speech recognition APIs
 declare global {
     interface Window {
-        SpeechRecognition: any;
-        webkitSpeechRecognition: any;
+        SpeechRecognition: new () => SpeechRecognition;
+        webkitSpeechRecognition: new () => SpeechRecognition;
     }
 }
+
+// Maximum allowed recording duration (2 minutes)
+const MAX_RECORDING_MS = 120_000;
 
 export const useSpeechRecognition = () => {
     const [isRecording, setIsRecording] = useState(false);
@@ -15,13 +18,36 @@ export const useSpeechRecognition = () => {
     const [error, setError] = useState<string | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<BlobPart[]>([]);
-    const recognitionRef = useRef<any>(null);
+    const recognitionRef = useRef<InstanceType<typeof SpeechRecognition> | null>(null);
     const isRecordingRef = useRef(false);
     const startTimeRef = useRef(0);
+    const maxRecordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const prevAudioUrlRef = useRef<string | null>(null);
 
     // Initial check for browser support
     const isSupported = typeof window !== 'undefined' &&
         (!!window.SpeechRecognition || !!window.webkitSpeechRecognition);
+
+    // Revoke previous ObjectURL when a new one is set (prevent memory leaks)
+    useEffect(() => {
+        if (prevAudioUrlRef.current) {
+            URL.revokeObjectURL(prevAudioUrlRef.current);
+        }
+        prevAudioUrlRef.current = audioUrl;
+    }, [audioUrl]);
+
+    // Revoke ObjectURL on unmount
+    useEffect(() => {
+        return () => {
+            if (prevAudioUrlRef.current) {
+                URL.revokeObjectURL(prevAudioUrlRef.current);
+                prevAudioUrlRef.current = null;
+            }
+            if (maxRecordingTimerRef.current) {
+                clearTimeout(maxRecordingTimerRef.current);
+            }
+        };
+    }, []);
 
     const initRecognition = useCallback(() => {
         if (!isSupported) {
@@ -30,15 +56,15 @@ export const useSpeechRecognition = () => {
         }
 
         if (!recognitionRef.current) {
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            const recognition = new SpeechRecognition();
+            const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const recognition = new SpeechRecognitionAPI();
 
             // Configure based on requirements
             recognition.continuous = false;
             recognition.interimResults = false;
             recognition.lang = 'en-US';
 
-            recognition.onresult = (event: any) => {
+            recognition.onresult = (event: SpeechRecognitionEvent) => {
                 let finalTranscript = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
@@ -52,7 +78,7 @@ export const useSpeechRecognition = () => {
                 isRecordingRef.current = false;
             };
 
-            recognition.onerror = (event: any) => {
+            recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
                 const errorMsg = event.error === 'not-allowed'
                     ? 'Microphone access denied. Please click "Allow".'
                     : `Speech error: ${event.error}`;
@@ -100,12 +126,13 @@ export const useSpeechRecognition = () => {
                     const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
                     const url = URL.createObjectURL(audioBlob);
                     setAudioUrl(url);
-                    // Stop tracks to release microphone if wanted, but recognition might need it
+                    // Stop tracks to release microphone
+                    stream.getTracks().forEach(track => track.stop());
                 };
 
                 mediaRecorderRef.current = mediaRecorder;
 
-            } catch (err) {
+            } catch {
                 setError('Microphone access denied. Please allow microphone access.');
                 return;
             }
@@ -120,9 +147,20 @@ export const useSpeechRecognition = () => {
                 setIsRecording(true);
                 isRecordingRef.current = true;
                 startTimeRef.current = Date.now();
-            } catch (err: any) {
+
+                // Auto-stop after maximum duration to prevent runaway recordings
+                maxRecordingTimerRef.current = setTimeout(() => {
+                    if (isRecordingRef.current) {
+                        recognitionRef.current?.stop();
+                        if (mediaRecorderRef.current?.state === 'recording') {
+                            mediaRecorderRef.current.stop();
+                        }
+                        setError('Recording stopped: maximum duration of 2 minutes reached.');
+                    }
+                }, MAX_RECORDING_MS);
+            } catch (err: unknown) {
                 // Handle cases where recognition is already started
-                if (err.name === 'InvalidStateError') {
+                if (err instanceof DOMException && err.name === 'InvalidStateError') {
                     recognition.stop();
                     setTimeout(() => {
                         try {
@@ -130,7 +168,7 @@ export const useSpeechRecognition = () => {
                             setIsRecording(true);
                             isRecordingRef.current = true;
                             startTimeRef.current = Date.now();
-                        } catch (e) { }
+                        } catch { /* ignore */ }
                     }, 200);
                 } else {
                     setError('Failed to start recording');
@@ -140,6 +178,12 @@ export const useSpeechRecognition = () => {
     }, [initRecognition]);
 
     const stopRecording = useCallback(() => {
+        // Clear the max-duration timer
+        if (maxRecordingTimerRef.current) {
+            clearTimeout(maxRecordingTimerRef.current);
+            maxRecordingTimerRef.current = null;
+        }
+
         // Prevent immediately stopping if the user just tapped it (allow at least 500ms to register real hold)
         const timeElapsed = Date.now() - startTimeRef.current;
 

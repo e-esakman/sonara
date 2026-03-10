@@ -12,8 +12,23 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 3000;
 
-const allowedOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
-app.use(cors({ origin: allowedOrigin }));
+const allowedOrigins = new Set(
+    (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173')
+        .split(',')
+        .map(o => o.trim())
+        .filter(Boolean)
+);
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (e.g. server-to-server, curl) or matching origins
+        if (!origin || allowedOrigins.has(origin)) {
+            callback(null, origin || true);
+        } else {
+            callback(new Error(`CORS: origin '${origin}' is not allowed`));
+        }
+    },
+    credentials: true,
+}));
 app.use(express.json());
 
 // health route

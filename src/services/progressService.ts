@@ -1,3 +1,5 @@
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+
 export interface SessionData {
     text: string;
     accuracyScore: number;
@@ -15,7 +17,7 @@ export interface ProgressData {
 
 export const saveSession = async (session: SessionData): Promise<void> => {
     try {
-        await fetch('http://localhost:3000/session', {
+        await fetch(`${BACKEND_URL}/session`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -29,7 +31,8 @@ export const saveSession = async (session: SessionData): Promise<void> => {
 
 export const getProgress = async (userId: string = 'anonymous'): Promise<ProgressData | null> => {
     try {
-        const response = await fetch(`http://localhost:3000/progress?userId=${userId}`);
+        const encodedUserId = encodeURIComponent(userId);
+        const response = await fetch(`${BACKEND_URL}/progress?userId=${encodedUserId}`);
         if (!response.ok) {
             throw new Error(`Error: ${response.statusText}`);
         }
