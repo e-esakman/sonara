@@ -1,10 +1,11 @@
+import http from 'http';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 
 import analyzeRoute from './routes/analyze.ts';
 import progressRoute from './routes/progress.ts';
-import { generateLiveSession } from './liveSession.ts';
+import { setupLiveProxy } from './liveProxy.ts';
 
 dotenv.config();
 
@@ -15,7 +16,7 @@ app.use(cors());
 app.use(express.json());
 
 // health route
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
     res.send("Sonara backend running 🚀");
 });
 
@@ -23,9 +24,12 @@ app.get("/", (req, res) => {
 app.use('/analyze', analyzeRoute);
 app.use('/', progressRoute);
 
-// Gemini Live session
-app.post('/live-session', generateLiveSession);
+// Create HTTP server so the WebSocket proxy can share the same port
+const server = http.createServer(app);
 
-app.listen(port, () => {
+// Gemini Live WebSocket proxy — API key stays server-side
+setupLiveProxy(server);
+
+server.listen(port, () => {
     console.log(`Sonara backend listening at http://localhost:${port}`);
 });
