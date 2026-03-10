@@ -1,30 +1,34 @@
-import CustomCursor from './components/CustomCursor';
-import Navigation from './components/Navigation';
-import Hero from './sections/Hero';
-import HowItWorks from './sections/HowItWorks';
-import Trainer from './sections/Trainer';
-import Features from './sections/Features';
-import Progress from './sections/Progress';
-import Accessibility from './sections/Accessibility';
-import FAQSection from './sections/FAQSection';
-import Footer from './sections/Footer';
-import Reader from './sections/Reader';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { StoreProvider } from './store/useStore';
+import MainLayout from './layouts/MainLayout';
+import ProtectedRoute from './components/ProtectedRoute';
+import Home from './pages/Home';
+import Practice from './pages/Practice';
+import ProgressDashboard from './pages/ProgressDashboard';
+import Analytics from './pages/Analytics';
+import Sessions from './pages/Sessions';
+import Library from './pages/Library';
+import ReadPassage from './pages/ReadPassage';
+import Login from './pages/Login';
 
 function App() {
   return (
-    <>
-      <CustomCursor />
-      <Navigation />
-      <Hero />
-      <HowItWorks />
-      <Trainer />
-      <Reader />
-      <Features />
-      <Progress />
-      <Accessibility />
-      <FAQSection />
-      <Footer />
-    </>
+    <StoreProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/" element={<MainLayout />}>
+            <Route index element={<Home />} />
+            <Route path="practice" element={<ProtectedRoute><Practice /></ProtectedRoute>} />
+            <Route path="library" element={<ProtectedRoute><Library /></ProtectedRoute>} />
+            <Route path="read/:id" element={<ProtectedRoute><ReadPassage /></ProtectedRoute>} />
+            <Route path="progress" element={<ProtectedRoute><ProgressDashboard /></ProtectedRoute>} />
+            <Route path="analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+            <Route path="sessions" element={<ProtectedRoute><Sessions /></ProtectedRoute>} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </StoreProvider>
   );
 }
 
