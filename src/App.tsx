@@ -8,7 +8,7 @@ import ProgressDashboard from './pages/ProgressDashboard';
 import Analytics from './pages/Analytics';
 import Sessions from './pages/Sessions';
 import Library from './pages/Library';
-import ReadPassage from './pages/ReadPassage';
+import ReadingViewer from './pages/ReadingViewer';
 import Login from './pages/Login';
 
 function App() {
@@ -21,7 +21,7 @@ function App() {
             <Route index element={<Home />} />
             <Route path="practice" element={<ProtectedRoute><Practice /></ProtectedRoute>} />
             <Route path="library" element={<ProtectedRoute><Library /></ProtectedRoute>} />
-            <Route path="read/:id" element={<ProtectedRoute><ReadPassage /></ProtectedRoute>} />
+            <Route path="read/:id" element={<ProtectedRoute><ReadingViewer /></ProtectedRoute>} />
             <Route path="progress" element={<ProtectedRoute><ProgressDashboard /></ProtectedRoute>} />
             <Route path="analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
             <Route path="sessions" element={<ProtectedRoute><Sessions /></ProtectedRoute>} />
