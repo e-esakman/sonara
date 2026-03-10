@@ -1,3 +1,5 @@
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
+
 export interface AnalysisResult {
     accuracyScore: number;
     incorrectWords: string[];
@@ -9,7 +11,7 @@ export interface AnalysisResult {
 
 export const analyzePronunciation = async (text: string, transcript: string): Promise<AnalysisResult> => {
     try {
-        const response = await fetch('http://localhost:3000/analyze', {
+        const response = await fetch(`${BACKEND_URL}/analyze`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

@@ -69,17 +69,47 @@ const LS_AUTISM_KEY = 'sonara_autism_mode';
 const LS_FOCUS_KEY = 'sonara_focus_mode';
 const LS_GENTLE_KEY = 'sonara_gentle_feedback';
 
+// Maximum number of sessions kept in localStorage to prevent quota overflow
+const MAX_STORED_SESSIONS = 200;
+
+function isValidUser(obj: unknown): obj is User {
+    return (
+        typeof obj === 'object' && obj !== null &&
+        typeof (obj as User).id === 'string' && (obj as User).id.length > 0 &&
+        typeof (obj as User).email === 'string' && (obj as User).email.length > 0 &&
+        typeof (obj as User).name === 'string' &&
+        typeof (obj as User).createdAt === 'string'
+    );
+}
+
+function isValidSession(obj: unknown): obj is PracticeSession {
+    return (
+        typeof obj === 'object' && obj !== null &&
+        typeof (obj as PracticeSession).sessionId === 'string' &&
+        typeof (obj as PracticeSession).passageId === 'string' &&
+        typeof (obj as PracticeSession).pronunciationScore === 'number' &&
+        typeof (obj as PracticeSession).createdAt === 'string'
+    );
+}
+
 function loadUser(): User | null {
     try {
         const raw = localStorage.getItem(LS_USER_KEY);
-        return raw ? JSON.parse(raw) : null;
+        if (!raw) return null;
+        const parsed: unknown = JSON.parse(raw);
+        if (isValidUser(parsed)) return parsed;
+        localStorage.removeItem(LS_USER_KEY);
+        return null;
     } catch { return null; }
 }
 
 function loadSessions(): PracticeSession[] {
     try {
         const raw = localStorage.getItem(LS_SESSIONS_KEY);
-        return raw ? JSON.parse(raw) : [];
+        if (!raw) return [];
+        const parsed: unknown = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed.filter(isValidSession);
     } catch { return []; }
 }
 
@@ -154,7 +184,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
 
     // Persist sessions and recalc stats
     useEffect(() => {
-        localStorage.setItem(LS_SESSIONS_KEY, JSON.stringify(sessions));
+        // Sessions are stored newest-first (prepended in addSession), so slice(0, MAX) keeps the most recent.
+        const toStore = sessions.slice(0, MAX_STORED_SESSIONS);
+        localStorage.setItem(LS_SESSIONS_KEY, JSON.stringify(toStore));
         setProgressStats(calcStats(sessions));
     }, [sessions]);
 
