@@ -7,7 +7,7 @@ const Navigation = () => {
     const [isOpen, setIsOpen] = useState(false);
     const location = useLocation();
     const navigate = useNavigate();
-    const { user, logout, autismMode, toggleAutismMode, focusMode, toggleFocusMode, gentleFeedback, toggleGentleFeedback } = useStore();
+    const { user, logout, autismMode, toggleAutismMode, focusMode, toggleFocusMode, gentleFeedback, toggleGentleFeedback, accentStyle, setAccentStyle } = useStore();
 
     const navLinks = [
         { to: '/', label: 'Home' },
@@ -69,6 +69,21 @@ const Navigation = () => {
                             <Icon icon="solar:eye-linear" width="14" />
                             {focusMode ? 'Focus On' : 'Focus'}
                         </button>
+
+                        {/* Accent Dropdown (Desktop) */}
+                        <div className="hidden md:flex items-center relative group">
+                            <select
+                                value={accentStyle}
+                                onChange={(e) => setAccentStyle(e.target.value as 'American' | 'British' | 'Indian')}
+                                className="appearance-none bg-neutral-100 hover:bg-neutral-200 text-neutral-600 text-xs font-sans px-3 py-1.5 pr-7 rounded-full outline-none cursor-pointer transition-colors"
+                                title="AI Coach Accent Style"
+                            >
+                                <option value="American">🇺🇸 US English</option>
+                                <option value="British">🇬🇧 UK English</option>
+                                <option value="Indian">🇮🇳 Indian English</option>
+                            </select>
+                            <Icon icon="solar:alt-arrow-down-linear" className="absolute right-2 text-neutral-400 pointer-events-none" width="12" />
+                        </div>
                     </>
                 )}
 
@@ -130,6 +145,20 @@ const Navigation = () => {
                                     <Icon icon="solar:heart-linear" width="18" />
                                     {gentleFeedback ? 'Gentle Feedback: On' : 'Gentle Feedback: Off'}
                                 </button>
+
+                                {/* Accent selector Mobile */}
+                                <div className="flex items-center gap-2 mt-2">
+                                    <Icon icon="solar:global-linear" width="18" className="text-neutral-500" />
+                                    <select
+                                        value={accentStyle}
+                                        onChange={(e) => setAccentStyle(e.target.value as 'American' | 'British' | 'Indian')}
+                                        className="bg-neutral-50 border border-neutral-200 text-neutral-700 text-sm font-sans px-3 py-2 rounded-lg outline-none flex-1"
+                                    >
+                                        <option value="American">American English Coach</option>
+                                        <option value="British">British English Coach</option>
+                                        <option value="Indian">Indian English Coach</option>
+                                    </select>
+                                </div>
                             </div>
                         )}
                         {user ? (

@@ -58,6 +58,10 @@ interface StoreContextValue {
     toggleFocusMode: () => void;
     gentleFeedback: boolean;
     toggleGentleFeedback: () => void;
+
+    // Accent Training Mode
+    accentStyle: 'American' | 'British' | 'Indian';
+    setAccentStyle: (accent: 'American' | 'British' | 'Indian') => void;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -68,6 +72,7 @@ const LS_SESSIONS_KEY = 'sonara_sessions';
 const LS_AUTISM_KEY = 'sonara_autism_mode';
 const LS_FOCUS_KEY = 'sonara_focus_mode';
 const LS_GENTLE_KEY = 'sonara_gentle_feedback';
+const LS_ACCENT_KEY = 'sonara_accent_style';
 
 // Maximum number of sessions kept in localStorage to prevent quota overflow
 const MAX_STORED_SESSIONS = 200;
@@ -131,6 +136,14 @@ function loadGentleFeedback(): boolean {
     } catch { return false; }
 }
 
+function loadAccentStyle(): 'American' | 'British' | 'Indian' {
+    try {
+        const val = localStorage.getItem(LS_ACCENT_KEY);
+        if (val === 'American' || val === 'British' || val === 'Indian') return val;
+        return 'American';
+    } catch { return 'American'; }
+}
+
 // ─── Stats calculator ────────────────────────────────────────────
 function calcStats(sessions: PracticeSession[]): ProgressStats {
     if (sessions.length === 0) {
@@ -175,6 +188,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     const [autismMode, setAutismMode] = useState<boolean>(loadAutismMode);
     const [focusMode, setFocusMode] = useState<boolean>(loadFocusMode);
     const [gentleFeedback, setGentleFeedback] = useState<boolean>(loadGentleFeedback);
+    const [accentStyle, setAccentStyle] = useState<'American' | 'British' | 'Indian'>(loadAccentStyle);
 
     // Persist user
     useEffect(() => {
@@ -214,6 +228,11 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     useEffect(() => {
         localStorage.setItem(LS_GENTLE_KEY, String(gentleFeedback));
     }, [gentleFeedback]);
+
+    // Persist accent style
+    useEffect(() => {
+        localStorage.setItem(LS_ACCENT_KEY, accentStyle);
+    }, [accentStyle]);
 
     const login = useCallback((email: string, name: string) => {
         const existing = loadUser();
@@ -256,8 +275,16 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         setGentleFeedback(prev => !prev);
     }, []);
 
+    const updateAccentStyle = useCallback((accent: 'American' | 'British' | 'Indian') => {
+        setAccentStyle(accent);
+    }, []);
+
     return (
-        <StoreContext.Provider value={{ user, login, signup, logout, sessions, addSession, progressStats, autismMode, toggleAutismMode, focusMode, toggleFocusMode, gentleFeedback, toggleGentleFeedback }}>
+        <StoreContext.Provider value={{
+            user, login, signup, logout, sessions, addSession, progressStats,
+            autismMode, toggleAutismMode, focusMode, toggleFocusMode, gentleFeedback, toggleGentleFeedback,
+            accentStyle, setAccentStyle: updateAccentStyle
+        }}>
             {children}
         </StoreContext.Provider>
     );

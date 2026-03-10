@@ -6,11 +6,12 @@ import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { analyzePronunciation } from '../services/pronunciationService';
 import type { AnalysisResult } from '../services/pronunciationService';
 import { useStore } from '../store/useStore';
+import { speakText, stopSpeaking } from '../utils/tts';
 
-const ReadPassage = () => {
+const ReadingViewer = () => {
     const { id } = useParams<{ id: string }>();
     const passage = getPassageById(id || '');
-    const { addSession, autismMode } = useStore();
+    const { addSession, autismMode, accentStyle } = useStore();
 
     const {
         isRecording,
@@ -111,10 +112,12 @@ const ReadPassage = () => {
 
     const playCorrect = () => {
         if (!passage) return;
-        const utterance = new SpeechSynthesisUtterance(passage.content.slice(0, 250));
-        utterance.lang = 'en-US';
-        utterance.rate = autismMode ? 0.7 : 0.9;
-        window.speechSynthesis.speak(utterance);
+        stopSpeaking(); // Stop any previous playback
+        speakText({
+            text: passage.content,
+            accentStyle: accentStyle,
+            rate: autismMode ? 0.7 : 0.9,
+        });
     };
 
     // Word-level comparison — inline-block for proper wrapping
@@ -422,4 +425,4 @@ const ReadPassage = () => {
     );
 };
 
-export default ReadPassage;
+export default ReadingViewer;

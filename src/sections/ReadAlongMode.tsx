@@ -5,17 +5,19 @@ import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { analyzePronunciation } from '../services/pronunciationService';
 import type { AnalysisResult } from '../services/pronunciationService';
 import { useStore } from '../store/useStore';
+import { speakText, stopSpeaking } from '../utils/tts';
 
 interface Props {
     passage: Passage;
 }
 
 const ReadAlongMode = ({ passage }: Props) => {
-    const { addSession, autismMode } = useStore();
+    const { addSession, autismMode, accentStyle } = useStore();
 
     const {
         isRecording,
         transcript,
+        interimTranscript,
         audioUrl,
         isSupported,
         error: speechError,
@@ -32,6 +34,7 @@ const ReadAlongMode = ({ passage }: Props) => {
     const [showScores, setShowScores] = useState(false);
     const [sessionSaved, setSessionSaved] = useState(false);
     const [wordsPerMinute, setWordsPerMinute] = useState<number | null>(null);
+    const [currentReadingWordIdx, setCurrentReadingWordIdx] = useState<number>(-1);
     const recordingStartRef = useRef<number>(0);
 
     const actualText = passage.id === 'custom' ? customText : passage.content;
@@ -49,8 +52,10 @@ const ReadAlongMode = ({ passage }: Props) => {
     }, [passage.id]);
 
     useEffect(() => {
-        if (transcript) setSpokenTranscript(transcript);
-    }, [transcript]);
+        if (transcript || interimTranscript) {
+            setSpokenTranscript((transcript + ' ' + (interimTranscript || '')).trim());
+        }
+    }, [transcript, interimTranscript]);
 
     // Analyze on stop
     useEffect(() => {
@@ -99,6 +104,25 @@ const ReadAlongMode = ({ passage }: Props) => {
                 }
 
                 setTimeout(() => setShowScores(true), 100);
+
+                // Speak feedback using TTS
+                let feedbackText = '';
+                if (result.accuracyScore >= 95) {
+                    feedbackText = "Excellent pronunciation! You sounded very natural.";
+                } else if (result.incorrectWords.length > 0) {
+                    feedbackText = `Good effort! Let's practice the word ${result.incorrectWords[0]}.`;
+                } else if (result.accuracyScore >= 80) {
+                    feedbackText = "Great job! Your fluency is improving.";
+                } else {
+                    feedbackText = "Keep practicing, you're getting there.";
+                }
+
+                speakText({
+                    text: feedbackText,
+                    accentStyle,
+                    rate: autismMode ? 0.8 : 1.0
+                });
+
             } catch (error: any) {
                 setRetryMsg(null);
                 setApiError(error.message || 'Failed connecting to backend.');
@@ -112,15 +136,33 @@ const ReadAlongMode = ({ passage }: Props) => {
     }, [transcript, isRecording]);
 
     const handleStart = () => {
+        stopSpeaking();
+        setCurrentReadingWordIdx(-1);
+        setSpokenTranscript('');
         recordingStartRef.current = Date.now();
         startRecording();
     };
 
     const playCorrect = () => {
-        const utterance = new SpeechSynthesisUtterance(actualText.slice(0, 300));
-        utterance.lang = 'en-US';
-        utterance.rate = autismMode ? 0.7 : 0.9;
-        window.speechSynthesis.speak(utterance);
+        setCurrentReadingWordIdx(0);
+
+        // Count words to map charIndex to wordIndex roughly
+        const words = actualText.split(/\s+/);
+        let charOffsets = [0];
+        for (let i = 0; i < words.length; i++) {
+            charOffsets.push(charOffsets[charOffsets.length - 1] + words[i].length + 1);
+        }
+
+        speakText({
+            text: actualText.slice(0, 300),
+            accentStyle,
+            rate: autismMode ? 0.7 : 0.9,
+            onBoundary: (charIndex: number) => {
+                const wIdx = charOffsets.findIndex(off => off > charIndex) - 1;
+                if (wIdx >= 0) setCurrentReadingWordIdx(wIdx);
+            },
+            onEnd: () => setCurrentReadingWordIdx(-1)
+        });
     };
 
     // ─── Word-level highlights: green/red/yellow ─────────────────
@@ -147,6 +189,11 @@ const ReadAlongMode = ({ passage }: Props) => {
                 className += 'text-amber-600 bg-amber-50 px-0.5 rounded border-b-2 border-amber-300 font-medium';
             } else {
                 className += 'text-emerald-700';
+            }
+
+            // Guided Reading highlight
+            if (idx === currentReadingWordIdx) {
+                className += ' ring-2 ring-indigo-400 bg-indigo-50 px-1 rounded';
             }
 
             return (
@@ -266,8 +313,8 @@ const ReadAlongMode = ({ passage }: Props) => {
                             onTouchStart={(e) => { e.preventDefault(); handleStart(); }}
                             onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
                             className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-all duration-200 touch-none select-none ${isRecording
-                                    ? 'bg-rose-500 mic-recording scale-110'
-                                    : 'bg-[#111] hover:scale-105 hover:shadow-xl'
+                                ? 'bg-rose-500 mic-recording scale-110'
+                                : 'bg-[#111] hover:scale-105 hover:shadow-xl'
                                 }`}
                             disabled={isAnalyzing || !isSupported || !actualText}
                             aria-label="Hold to speak"
@@ -277,7 +324,7 @@ const ReadAlongMode = ({ passage }: Props) => {
 
                         {audioUrl && (
                             <button
-                                onClick={() => { const a = new Audio(audioUrl); a.play().catch(console.error); }}
+                                onClick={() => { stopSpeaking(); const a = new Audio(audioUrl); a.play().catch(console.error); }}
                                 className="w-12 h-12 flex items-center justify-center rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-all hover:scale-105"
                                 title="Replay your recording"
                             >
@@ -455,7 +502,7 @@ const ReadAlongMode = ({ passage }: Props) => {
 
                         {/* Perfect score */}
                         {pScore > 0 && analysis?.incorrectWords && analysis.incorrectWords.length === 0 && (
-                            <div className="flex flex-col items-center justify-center gap-3 text-center py-4">
+                            <div className="flex flex-col items-center justify-center gap-3 text-center py-4 border-t border-neutral-100 pt-6">
                                 <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center">
                                     <Icon icon="solar:check-circle-bold-duotone" width="40" className="text-emerald-500" />
                                 </div>
@@ -465,6 +512,29 @@ const ReadAlongMode = ({ passage }: Props) => {
                                 <p className="text-sm text-neutral-500 font-sans max-w-[250px]">
                                     {autismMode ? 'Your reading was wonderful. Be proud of yourself!' : 'Your reading sounds natural and clear.'}
                                 </p>
+                            </div>
+                        )}
+
+                        {/* Replay & Compare */}
+                        {pScore > 0 && audioUrl && (
+                            <div className="bg-neutral-50 rounded-2xl p-4 sm:p-5 border border-neutral-100/50 mt-2">
+                                <h4 className="text-neutral-700 text-xs font-medium uppercase tracking-tight flex items-center gap-1.5 font-sans mb-3 text-center justify-center">
+                                    <Icon icon="solar:headphones-round-sound-linear" width="16" /> Compare Pronunciation
+                                </h4>
+                                <div className="flex justify-center gap-4">
+                                    <button
+                                        onClick={() => { stopSpeaking(); const a = new Audio(audioUrl); a.play().catch(console.error); }}
+                                        className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+                                    >
+                                        <Icon icon="solar:play-circle-linear" width="18" /> Replay Yours
+                                    </button>
+                                    <button
+                                        onClick={playCorrect}
+                                        className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
+                                    >
+                                        <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
+                                    </button>
+                                </div>
                             </div>
                         )}
                     </div>
