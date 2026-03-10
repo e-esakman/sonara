@@ -1,79 +1,75 @@
 import { Icon } from '@iconify/react';
 
+const features = [
+    {
+        icon: 'solar:soundwave-circle-linear',
+        title: 'Real-time Pronunciation Feedback',
+        description: 'Get instant corrections on your pronunciation as you speak. Words are highlighted green for correct and red for mispronounced.',
+        hoverBg: 'group-hover:bg-indigo-50',
+        hoverText: 'group-hover:text-indigo-600',
+    },
+    {
+        icon: 'solar:chat-round-dots-linear',
+        title: 'AI Live Coach Interaction',
+        description: 'An AI coach analyzes your speech in real-time, providing scores, accent detection, phonetic breakdowns, and tailored coaching tips.',
+        hoverBg: 'group-hover:bg-blue-50',
+        hoverText: 'group-hover:text-blue-600',
+    },
+    {
+        icon: 'solar:book-2-linear',
+        title: 'Reading Practice with Books',
+        description: 'Browse a library of 27 curated reading passages and tongue twisters across 5 difficulty levels and 8 categories.',
+        hoverBg: 'group-hover:bg-emerald-50',
+        hoverText: 'group-hover:text-emerald-600',
+    },
+    {
+        icon: 'solar:chart-square-linear',
+        title: 'Speech Analytics & Tracking',
+        description: 'Visualize your improvement with real charts mapping pronunciation accuracy, fluency scores, speaking speed, and confidence over time.',
+        hoverBg: 'group-hover:bg-amber-50',
+        hoverText: 'group-hover:text-amber-600',
+    },
+    {
+        icon: 'solar:history-linear',
+        title: 'Session Replay & History',
+        description: 'Review every practice session with audio replay, detailed score breakdowns, and compare your performance across attempts.',
+        hoverBg: 'group-hover:bg-purple-50',
+        hoverText: 'group-hover:text-purple-600',
+    },
+    {
+        icon: 'solar:chat-round-like-linear',
+        title: 'Tongue Twister Training',
+        description: 'Improve articulation and speaking speed with classic tongue twisters designed to challenge your pronunciation and build muscle memory.',
+        hoverBg: 'group-hover:bg-rose-50',
+        hoverText: 'group-hover:text-rose-600',
+    },
+];
+
 const Features = () => {
     return (
         <section id="features" className="w-full py-32 bg-white px-6">
             <div className="max-w-6xl mx-auto">
-                <div className="text-sm font-medium tracking-tight text-neutral-400 mb-16 uppercase font-sans">
-                    Features
+                <div className="text-center mb-20">
+                    <div className="text-sm font-medium tracking-tight text-neutral-400 mb-4 uppercase font-sans">
+                        Features
+                    </div>
+                    <h2 className="text-4xl md:text-5xl font-dm-sans text-[#111] tracking-tight leading-tight max-w-2xl mx-auto">
+                        Everything you need to speak with confidence
+                    </h2>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-y-16 gap-x-12">
-                    {/* Feature 1 */}
-                    <div className="flex flex-col gap-4 group">
-                        <div className="w-12 h-12 rounded-2xl bg-[#F7F5F2] flex items-center justify-center text-neutral-600 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors duration-300">
-                            <Icon icon="solar:soundwave-circle-linear" width="28" />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {features.map((feature, i) => (
+                        <div key={i} className="group bg-neutral-50 hover:bg-white rounded-3xl p-8 border border-neutral-100 hover:border-neutral-200 hover:shadow-[0_20px_60px_rgba(0,0,0,0.06)] transition-all duration-300 cursor-default">
+                            <div className={`w-14 h-14 rounded-2xl bg-[#F7F5F2] flex items-center justify-center text-neutral-500 ${feature.hoverBg} ${feature.hoverText} transition-colors duration-300 mb-6`}>
+                                <Icon icon={feature.icon} width="28" />
+                            </div>
+                            <h4 className="text-xl tracking-tight text-[#111] font-medium font-dm-sans mb-3">{feature.title}</h4>
+                            <p className="text-base text-neutral-500 leading-relaxed font-sans">
+                                {feature.description}
+                            </p>
                         </div>
-                        <h4 className="text-xl tracking-tight text-[#111] font-normal font-dm-sans">Real-time feedback</h4>
-                        <p className="text-base text-neutral-500 leading-relaxed font-sans">
-                            Get instant corrections on your pronunciation as you speak, highlighting specific areas for improvement.
-                        </p>
-                    </div>
-
-                    {/* Feature 2 */}
-                    <div className="flex flex-col gap-4 group">
-                        <div className="w-12 h-12 rounded-2xl bg-[#F7F5F2] flex items-center justify-center text-neutral-600 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors duration-300">
-                            <Icon icon="solar:global-linear" width="28" />
-                        </div>
-                        <h4 className="text-xl tracking-tight text-[#111] font-normal font-dm-sans">Accent detection</h4>
-                        <p className="text-base text-neutral-500 leading-relaxed font-sans">
-                            Advanced AI models recognize subtle regional accent variations to provide highly tailored coaching.
-                        </p>
-                    </div>
-
-                    {/* Feature 3 */}
-                    <div className="flex flex-col gap-4 group">
-                        <div className="w-12 h-12 rounded-2xl bg-[#F7F5F2] flex items-center justify-center text-neutral-600 group-hover:bg-emerald-50 group-hover:text-emerald-600 transition-colors duration-300">
-                            <Icon icon="solar:chart-square-linear" width="28" />
-                        </div>
-                        <h4 className="text-xl tracking-tight text-[#111] font-normal font-dm-sans">Progress tracking</h4>
-                        <p className="text-base text-neutral-500 leading-relaxed font-sans">
-                            Visualize your improvement over time with detailed charts mapping your fluency and accuracy scores.
-                        </p>
-                    </div>
-
-                    {/* Feature 4 */}
-                    <div className="flex flex-col gap-4 group">
-                        <div className="w-12 h-12 rounded-2xl bg-[#F7F5F2] flex items-center justify-center text-neutral-600 group-hover:bg-amber-50 group-hover:text-amber-600 transition-colors duration-300">
-                            <Icon icon="solar:pie-chart-linear" width="28" />
-                        </div>
-                        <h4 className="text-xl tracking-tight text-[#111] font-normal font-dm-sans">Speech analytics</h4>
-                        <p className="text-base text-neutral-500 leading-relaxed font-sans">
-                            Deep dive into metrics like speaking rate, pauses, and pitch variations to sound more natural.
-                        </p>
-                    </div>
-
-                    {/* Feature 5 */}
-                    <div className="flex flex-col gap-4 group">
-                        <div className="w-12 h-12 rounded-2xl bg-[#F7F5F2] flex items-center justify-center text-neutral-600 group-hover:bg-purple-50 group-hover:text-purple-600 transition-colors duration-300">
-                            <Icon icon="solar:history-linear" width="28" />
-                        </div>
-                        <h4 className="text-xl tracking-tight text-[#111] font-normal font-dm-sans">Voice replay</h4>
-                        <p className="text-base text-neutral-500 leading-relaxed font-sans">
-                            Listen to your own recordings side-by-side with native speakers to spot the differences instantly.
-                        </p>
-                    </div>
-
-                    {/* Feature 6 */}
-                    <div className="flex flex-col gap-4 group">
-                        <div className="w-12 h-12 rounded-2xl bg-[#F7F5F2] flex items-center justify-center text-neutral-600 group-hover:bg-rose-50 group-hover:text-rose-600 transition-colors duration-300">
-                            <Icon icon="solar:star-linear" width="28" />
-                        </div>
-                        <h4 className="text-xl tracking-tight text-[#111] font-normal font-dm-sans">Confidence scoring</h4>
-                        <p className="text-base text-neutral-500 leading-relaxed font-sans">
-                            We measure not just correctness, but the confidence in your delivery to help you sound authoritative.
-                        </p>
-                    </div>
+                    ))}
                 </div>
             </div>
         </section>
