@@ -90,6 +90,10 @@ const FreeSpeakMode = () => {
         return () => {
             geminiLiveService.stopSession();
             stopAudioPlayback();
+            audioContextRef.current?.close().catch(() => { /* intentionally ignored */ });
+            audioContextRef.current = null;
+            micContextRef.current?.close().catch(() => { /* intentionally ignored */ });
+            micContextRef.current = null;
         };
     }, [stopAudioPlayback]);
 
