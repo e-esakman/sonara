@@ -5,13 +5,15 @@ import { analyzePronunciation } from '../services/pronunciationService';
 import type { AnalysisResult } from '../services/pronunciationService';
 import { geminiLiveService } from '../services/geminiLiveService';
 import { useStore } from '../store/useStore';
+import { speakText, stopSpeaking } from '../utils/tts';
 
 const FreeSpeakMode = () => {
-    const { addSession, autismMode } = useStore();
+    const { addSession, autismMode, accentStyle } = useStore();
 
     const {
         isRecording,
         transcript,
+        interimTranscript,
         audioUrl,
         isSupported,
         error: speechError,
@@ -98,11 +100,12 @@ const FreeSpeakMode = () => {
     }, [stopAudioPlayback]);
 
     useEffect(() => {
-        if (transcript) {
-            setSpokenText(transcript);
-            if (coachMode === 'standard') setLiveUserTranscript(transcript);
+        if (transcript || interimTranscript) {
+            const combined = (transcript + ' ' + (interimTranscript || '')).trim();
+            setSpokenText(combined);
+            if (coachMode === 'standard') setLiveUserTranscript(combined);
         }
-    }, [transcript, coachMode]);
+    }, [transcript, interimTranscript, coachMode]);
 
     // Standard analysis on stop
     useEffect(() => {
@@ -138,6 +141,24 @@ const FreeSpeakMode = () => {
                         incorrectWords: result.incorrectWords,
                         accentInfluence: result.accentInfluence,
                         audioUrl: audioUrl || undefined,
+                    });
+
+                    // Speak feedback using TTS
+                    let feedbackText = '';
+                    if (result.accuracyScore >= 90) {
+                        feedbackText = "Excellent pronunciation! You sounded very natural.";
+                    } else if (result.incorrectWords && result.incorrectWords.length > 0) {
+                        feedbackText = `Good effort! Let's practice the word ${result.incorrectWords[0]}.`;
+                    } else if (result.tips && result.tips.length > 0) {
+                        feedbackText = result.tips[0];
+                    } else {
+                        feedbackText = "Good job! Keep practicing.";
+                    }
+
+                    speakText({
+                        text: feedbackText,
+                        accentStyle,
+                        rate: autismMode ? 0.8 : 1.0
                     });
                 }
             } catch (error: any) {
@@ -236,6 +257,7 @@ const FreeSpeakMode = () => {
     }, [liveRecording, liveStatus, startLiveRecording, stopLiveRecording]);
 
     const handleStandardStart = () => {
+        stopSpeaking();
         recordingStartRef.current = Date.now();
         startRecording();
     };
@@ -343,7 +365,7 @@ const FreeSpeakMode = () => {
 
                     {/* Mic controls */}
                     <div className="relative z-10 flex justify-center items-center gap-6">
-                        {coachMode === 'live' ? (
+                        {coachMode === 'live' && (
                             <>
                                 <button
                                     onClick={stopAudioPlayback}
@@ -360,10 +382,11 @@ const FreeSpeakMode = () => {
                                     <Icon icon={liveRecording ? 'solar:stop-bold' : 'solar:microphone-2-linear'} width="28" />
                                 </button>
                             </>
-                        ) : (
+                        )}
+                        {coachMode === 'standard' && (
                             <>
                                 <button
-                                    onClick={() => { if (audioUrl) { const a = new Audio(audioUrl); a.play().catch(console.error); } }}
+                                    onClick={() => { stopSpeaking(); if (audioUrl) { const a = new Audio(audioUrl); a.play().catch(console.error); } }}
                                     className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-all hover:scale-105"
                                     title="Replay recording"
                                     disabled={!audioUrl}
@@ -541,13 +564,36 @@ const FreeSpeakMode = () => {
 
                                 {/* Perfect score */}
                                 {analysis && analysis.accuracyScore > 0 && (!analysis.incorrectWords || analysis.incorrectWords.length === 0) && (
-                                    <div className="flex flex-col items-center justify-center gap-3 text-center py-4">
+                                    <div className="flex flex-col items-center justify-center gap-3 text-center py-4 border-t border-neutral-100 pt-6">
                                         <div className="w-16 h-16 bg-emerald-50 rounded-full flex items-center justify-center">
                                             <Icon icon="solar:check-circle-bold-duotone" width="40" className="text-emerald-500" />
                                         </div>
                                         <h3 className="text-xl font-dm-sans text-[#111]">
                                             {autismMode ? 'You spoke wonderfully!' : 'Great Speaking!'}
                                         </h3>
+                                    </div>
+                                )}
+
+                                {/* Replay & Compare for FreeSpeak */}
+                                {analysis && analysis.accuracyScore > 0 && audioUrl && (
+                                    <div className="bg-neutral-50 rounded-2xl p-4 sm:p-5 border border-neutral-100/50 mt-2">
+                                        <h4 className="text-neutral-700 text-xs font-medium uppercase tracking-tight flex items-center gap-1.5 font-sans mb-3 text-center justify-center">
+                                            <Icon icon="solar:headphones-round-sound-linear" width="16" /> Compare Audio
+                                        </h4>
+                                        <div className="flex justify-center gap-4">
+                                            <button
+                                                onClick={() => { stopSpeaking(); const a = new Audio(audioUrl); a.play().catch(console.error); }}
+                                                className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+                                            >
+                                                <Icon icon="solar:play-circle-linear" width="18" /> Replay Yours
+                                            </button>
+                                            <button
+                                                onClick={() => speakText({ text: spokenText, accentStyle, rate: autismMode ? 0.7 : 0.9 })}
+                                                className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
+                                            >
+                                                <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>

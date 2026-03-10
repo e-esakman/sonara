@@ -1,10 +1,21 @@
+/// <reference types="@types/dom-speech-recognition" />
 import { useState, useCallback, useRef, useEffect } from 'react';
 
-// Extend window object to include the speech recognition APIs
+// Provide minimal fallback types to fix TS errors without full dom-speech-recognition
+interface SpeechRecognitionEvent extends Event {
+    resultIndex: number;
+    results: any;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+    error: string;
+    message: string;
+}
+
 declare global {
     interface Window {
-        SpeechRecognition: new () => SpeechRecognition;
-        webkitSpeechRecognition: new () => SpeechRecognition;
+        SpeechRecognition: any;
+        webkitSpeechRecognition: any;
     }
 }
 
@@ -14,11 +25,12 @@ const MAX_RECORDING_MS = 120_000;
 export const useSpeechRecognition = () => {
     const [isRecording, setIsRecording] = useState(false);
     const [transcript, setTranscript] = useState('');
+    const [interimTranscript, setInterimTranscript] = useState('');
     const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const mediaRecorderRef = useRef<MediaRecorder | null>(null);
     const audioChunksRef = useRef<BlobPart[]>([]);
-    const recognitionRef = useRef<InstanceType<typeof SpeechRecognition> | null>(null);
+    const recognitionRef = useRef<any>(null);
     const isRecordingRef = useRef(false);
     const startTimeRef = useRef(0);
     const maxRecordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -61,21 +73,21 @@ export const useSpeechRecognition = () => {
 
             // Configure based on requirements
             recognition.continuous = false;
-            recognition.interimResults = false;
+            recognition.interimResults = true;
             recognition.lang = 'en-US';
 
             recognition.onresult = (event: SpeechRecognitionEvent) => {
-                let finalTranscript = '';
+                let finalT = '';
+                let interimT = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
                     if (event.results[i].isFinal) {
-                        finalTranscript += event.results[i][0].transcript;
+                        finalT += event.results[i][0].transcript;
+                    } else {
+                        interimT += event.results[i][0].transcript;
                     }
                 }
-                if (finalTranscript) {
-                    setTranscript(finalTranscript);
-                }
-                setIsRecording(false);
-                isRecordingRef.current = false;
+                if (finalT) setTranscript(finalT);
+                setInterimTranscript(interimT);
             };
 
             recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
@@ -105,6 +117,7 @@ export const useSpeechRecognition = () => {
     const startRecording = useCallback(async () => {
         setError(null);
         setTranscript('');
+        setInterimTranscript('');
 
         // Ensure browser has permission before starting to prevent the "Hold-to-speak permission flash" bug
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -208,6 +221,7 @@ export const useSpeechRecognition = () => {
 
     return {
         transcript,
+        interimTranscript,
         audioUrl,
         isRecording,
         isSupported,

@@ -1,126 +1,86 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Icon } from '@iconify/react';
 import passages, { categories } from '../data/passages';
 import type { Passage } from '../data/passages';
-
-const difficultyColor: Record<string, string> = {
-    Beginner: 'bg-emerald-500',
-    Intermediate: 'bg-amber-500',
-    Advanced: 'bg-rose-500',
-};
+import BookCard from '../components/BookCard';
 
 const Library = () => {
     const [activeCategory, setActiveCategory] = useState<string>('All');
     const [activeDifficulty, setActiveDifficulty] = useState<string>('All');
 
-    const filtered = passages.filter(p => {
+    const filtered = passages.filter((p: Passage) => {
         if (activeCategory !== 'All' && p.category !== activeCategory) return false;
         if (activeDifficulty !== 'All' && p.difficulty !== activeDifficulty) return false;
         return true;
     });
 
     return (
-        <div className="pt-24 min-h-screen bg-neutral-50 pb-20">
-            <div className="max-w-7xl mx-auto px-6">
+        <div className="bg-[#FAFAFA] text-gray-900 antialiased min-h-screen pt-24 pb-20 selection:bg-gray-200 font-sans">
+            <div className="max-w-[90rem] mx-auto">
                 {/* Header */}
-                <div className="mb-10">
-                    <div className="flex items-center gap-3 mb-2">
-                        <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center">
-                            <Icon icon="solar:library-linear" width="22" className="text-indigo-600" />
+                <div className="px-6 md:px-12 mb-12">
+                    <div className="flex items-center gap-4 mb-4">
+                        <div className="w-12 h-12 rounded-2xl bg-white shadow-sm border border-gray-100 flex items-center justify-center">
+                            <Icon icon="lucide:library" className="text-gray-800 w-6 h-6" />
                         </div>
-                        <h1 className="text-4xl font-dm-sans text-[#111] tracking-tight">Reading Library</h1>
+                        <h1 className="text-4xl font-semibold tracking-tight text-gray-900">Reading Library</h1>
                     </div>
-                    <p className="text-neutral-500 font-sans ml-[52px]">Choose a passage and practice your pronunciation with AI coaching.</p>
+                    <p className="text-lg text-gray-500 md:ml-[64px] max-w-2xl">
+                        Explore our curated collection. Swipe or scroll through the passages and practice your pronunciation.
+                    </p>
                 </div>
 
-                {/* Filters */}
-                <div className="flex flex-col md:flex-row gap-4 mb-10">
-                    <div className="flex flex-wrap gap-2">
-                        {['All', ...categories].map(cat => (
-                            <button
-                                key={cat}
-                                onClick={() => setActiveCategory(cat)}
-                                className={`px-4 py-2 rounded-full text-sm font-sans font-medium transition-all duration-200 ${activeCategory === cat
-                                    ? 'bg-[#111] text-white shadow-md shadow-neutral-200'
-                                    : 'bg-white text-neutral-600 border border-neutral-200 hover:border-neutral-300 hover:shadow-sm'
-                                    }`}
-                            >
-                                {cat}
-                            </button>
+                {/* Filters Proper Section */}
+                <div className="px-6 md:px-12 mb-12">
+                    <div className="bg-white p-6 sm:p-8 rounded-3xl border border-gray-200 shadow-sm flex flex-col lg:flex-row gap-8 lg:gap-12">
+                        <div className="flex-1">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-4 tracking-tight font-dm-sans uppercase">Categories</h3>
+                            <div className="flex flex-wrap gap-2">
+                                {['All', ...categories].map((cat) => (
+                                    <button
+                                        key={cat}
+                                        onClick={() => setActiveCategory(cat)}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${activeCategory === cat
+                                                ? 'bg-gray-900 text-white shadow-md shadow-gray-200'
+                                                : 'bg-gray-50 text-gray-600 border border-gray-200 hover:border-gray-300 hover:bg-white hover:shadow-sm'
+                                            }`}
+                                    >
+                                        {cat}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="lg:w-72 shrink-0">
+                            <h3 className="text-sm font-semibold text-gray-900 mb-4 tracking-tight font-dm-sans uppercase">Difficulty</h3>
+                            <div className="flex flex-wrap gap-2">
+                                {['All', 'Beginner', 'Intermediate', 'Advanced'].map((diff) => (
+                                    <button
+                                        key={diff}
+                                        onClick={() => setActiveDifficulty(diff)}
+                                        className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${activeDifficulty === diff
+                                                ? 'bg-gray-900 text-white shadow-md shadow-gray-200'
+                                                : 'bg-gray-50 text-gray-600 border border-gray-200 hover:border-gray-300 hover:bg-white hover:shadow-sm'
+                                            }`}
+                                    >
+                                        {diff}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Bookshelf Grid */}
+                {filtered.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-12 px-6 md:px-12">
+                        {filtered.map((passage: Passage) => (
+                            <BookCard key={passage.id} passage={passage} />
                         ))}
                     </div>
-                    <div className="flex gap-2 md:ml-auto">
-                        {['All', 'Beginner', 'Intermediate', 'Advanced'].map(diff => (
-                            <button
-                                key={diff}
-                                onClick={() => setActiveDifficulty(diff)}
-                                className={`px-4 py-2 rounded-full text-sm font-sans font-medium transition-all duration-200 ${activeDifficulty === diff
-                                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-sm'
-                                    : 'bg-white text-neutral-600 border border-neutral-200 hover:border-neutral-300'
-                                    }`}
-                            >
-                                {diff}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* Bookshelf */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-10">
-                    {filtered.map((passage: Passage) => (
-                        <Link
-                            to={`/read/${passage.id}`}
-                            key={passage.id}
-                            className="group"
-                        >
-                            {/* Book Card — 3D perspective */}
-                            <div className="book-card book-spine">
-                                <div className={`bg-gradient-to-br ${passage.gradient} rounded-2xl h-64 sm:h-72 flex flex-col justify-between relative overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.12)] group-hover:shadow-[0_16px_50px_rgba(0,0,0,0.2)] transition-shadow duration-400`}>
-                                    {/* Decorative circles */}
-                                    <div className="absolute -top-10 -right-10 w-36 h-36 bg-white/10 rounded-full pointer-events-none" />
-                                    <div className="absolute -bottom-8 -left-8 w-28 h-28 bg-white/5 rounded-full pointer-events-none" />
-                                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-white/5 rounded-full pointer-events-none" />
-
-                                    {/* Top: Badge + Emoji */}
-                                    <div className="flex justify-between items-start p-5 relative z-10">
-                                        <span className={`text-[10px] font-bold uppercase tracking-wider text-white px-2.5 py-1 rounded-full ${difficultyColor[passage.difficulty]} bg-opacity-90`}>
-                                            {passage.difficulty}
-                                        </span>
-                                        <span className="text-3xl opacity-70 drop-shadow-sm select-none">{passage.coverEmoji || '📘'}</span>
-                                    </div>
-
-                                    {/* Bottom: Title + Meta */}
-                                    <div className="relative z-10 p-5 pt-0">
-                                        <h3 className="text-lg font-dm-sans text-white font-semibold leading-snug mb-2 line-clamp-2 drop-shadow-sm">
-                                            {passage.title}
-                                        </h3>
-                                        <div className="flex items-center gap-3 text-[11px] text-white/70 font-sans">
-                                            <span className="flex items-center gap-1">
-                                                <Icon icon="solar:clock-circle-linear" width="12" />
-                                                {passage.readingTime}
-                                            </span>
-                                            <span className="flex items-center gap-1">
-                                                <Icon icon="solar:text-linear" width="12" />
-                                                {passage.wordCount}w
-                                            </span>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Category label below */}
-                            <div className="mt-3 px-1">
-                                <p className="text-[11px] text-neutral-400 font-sans uppercase tracking-wider truncate">{passage.category}</p>
-                            </div>
-                        </Link>
-                    ))}
-                </div>
-
-                {filtered.length === 0 && (
-                    <div className="text-center py-20">
-                        <Icon icon="solar:book-2-linear" width="48" className="text-neutral-300 mx-auto mb-4" />
-                        <p className="text-neutral-500 font-sans">No passages match the selected filters.</p>
+                ) : (
+                    <div className="text-center py-20 px-6 md:px-12">
+                        <Icon icon="lucide:book-x" className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                        <p className="text-gray-500 text-lg">No passages match the selected filters.</p>
                     </div>
                 )}
             </div>
