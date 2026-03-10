@@ -76,6 +76,11 @@ export function setupLiveProxy(server: Server) {
                     });
                 } else if (msg.type === 'audioEnd') {
                     geminiSession.sendRealtimeInput({ audioStreamEnd: true });
+                } else if (msg.type === 'clientContent') {
+                    const dataObj = msg as any;
+                    if (dataObj.data && dataObj.data.turnComplete) {
+                        (geminiSession as any).sendRealtimeInput({ clientContent: { turnComplete: true } });
+                    }
                 }
             } catch (e) {
                 console.error('[LiveProxy] Failed to parse client message:', e);

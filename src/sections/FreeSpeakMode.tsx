@@ -46,12 +46,16 @@ const FreeSpeakMode = () => {
         audioQueueRef.current.forEach(source => { try { source.stop(); } catch (e) { } });
         audioQueueRef.current = [];
         nextAudioTimeRef.current = 0;
+        geminiLiveService.interrupt();
     }, []);
 
     // Gemini Live callbacks
     useEffect(() => {
         geminiLiveService.onStatus = setLiveStatus;
         geminiLiveService.onTextResponse = (t) => setLiveTranscript(prev => prev + ' ' + t);
+
+        // Add hook for turn completion if exposed, or we can just append liveTranscript here... wait, geminiLiveService has no onTurnComplete currently. Let's just track liveTranscript.
+
         geminiLiveService.onAudioResponse = (base64Audio) => {
             try {
                 const binaryString = atob(base64Audio);
@@ -116,7 +120,7 @@ const FreeSpeakMode = () => {
             setApiError(null);
             setRetryMsg(null);
             try {
-                const result = await analyzePronunciation(transcript, transcript, (attempt) => {
+                const result = await analyzePronunciation(transcript, transcript, accentStyle, (attempt) => {
                     setRetryMsg(`AI coach is busy, retrying... (attempt ${attempt})`);
                 });
                 setRetryMsg(null);
@@ -265,16 +269,42 @@ const FreeSpeakMode = () => {
     // ─── Pace meter ──────────────────────────────────────────────
     const renderPaceMeter = () => {
         if (wordsPerMinute === null) return null;
-        let paceLabel = 'Good pace';
-        let paceColor = 'text-emerald-600 bg-emerald-50';
-        if (wordsPerMinute < 100) { paceLabel = 'Speaking slowly'; paceColor = 'text-blue-600 bg-blue-50'; }
-        else if (wordsPerMinute > 180) { paceLabel = 'Speaking fast'; paceColor = 'text-amber-600 bg-amber-50'; }
+        let paceColor = 'bg-emerald-500';
+        let paceBg = 'bg-emerald-50';
+        let paceText = 'text-emerald-700';
+        let percent = Math.min((wordsPerMinute / 250) * 100, 100);
+
+        if (wordsPerMinute < 100) {
+            paceColor = 'bg-blue-500';
+            paceBg = 'bg-blue-50';
+            paceText = 'text-blue-700';
+        } else if (wordsPerMinute > 160) {
+            paceColor = 'bg-amber-500';
+            paceBg = 'bg-amber-50';
+            paceText = 'text-amber-700';
+        }
 
         return (
-            <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl ${paceColor} text-sm font-sans font-medium`}>
-                <Icon icon="solar:speedometer-linear" width="16" />
-                {wordsPerMinute} WPM — {paceLabel}
+            <div className={`p-4 rounded-2xl border border-neutral-100/50 ${paceBg} w-full max-w-sm`}>
+                <div className="flex justify-between items-center mb-2">
+                    <span className={`text-sm font-semibold uppercase tracking-wider font-sans ${paceText}`}>Speaking Pace</span>
+                    <span className={`text-sm font-bold font-sans ${paceText}`}>{wordsPerMinute} WPM</span>
+                </div>
+                <div className="w-full h-2 bg-white/50 rounded-full overflow-hidden mb-1.5">
+                    <div className={`h-full ${paceColor} rounded-full transition-all duration-700`} style={{ width: `${percent}%` }} />
+                </div>
+                <div className="flex justify-between text-[10px] text-neutral-400 uppercase font-sans font-medium">
+                    <span>Slow</span>
+                    <span className={wordsPerMinute >= 100 && wordsPerMinute <= 160 ? paceText : ''}>Optimal (100-160)</span>
+                    <span>Fast</span>
+                </div>
             </div>
+        );
+    };
+
+    const renderPhoneticWithStress = (phonetic: string) => {
+        return phonetic.split(/([A-Z]+)/).map((part, i) =>
+            /[A-Z]/.test(part) ? <span key={i} className="font-bold tracking-wider">{part}</span> : <span key={i}>{part}</span>
         );
     };
 
@@ -448,7 +478,10 @@ const FreeSpeakMode = () => {
                             <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center">
                                 <Icon icon="solar:chat-round-dots-bold" width="16" className="text-white" />
                             </div>
-                            <span className="text-sm font-semibold text-[#111] font-sans">Live AI Coach</span>
+                            <div className="flex flex-col">
+                                <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
+                                <span className="text-xs text-neutral-500 font-sans">Live AI Coach</span>
+                            </div>
                             <span className={`ml-auto text-xs font-sans px-2.5 py-1 rounded-full ${liveStatus === 'Connected' ? 'bg-emerald-50 text-emerald-600' : liveStatus.startsWith('Error') ? 'bg-rose-50 text-rose-600' : 'bg-neutral-100 text-neutral-500'}`}>
                                 {liveStatus}
                             </span>
@@ -509,7 +542,10 @@ const FreeSpeakMode = () => {
                                     <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center">
                                         <Icon icon="solar:chat-round-dots-bold" width="16" className="text-white" />
                                     </div>
-                                    <span className="text-sm font-semibold text-[#111] font-sans">Analysis Results</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
+                                        <span className="text-xs text-neutral-500 font-sans">Analysis Results</span>
+                                    </div>
                                 </div>
 
                                 {/* Score bar */}
@@ -536,7 +572,7 @@ const FreeSpeakMode = () => {
                                             {analysis.incorrectWords.map((word, i) => (
                                                 <span key={i} className="text-sm text-rose-500 font-medium font-sans bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100">
                                                     {word}
-                                                    {analysis.phoneticBreakdown?.[word] && <span className="text-xs text-rose-400 ml-1.5">({analysis.phoneticBreakdown[word]})</span>}
+                                                    {analysis.phoneticBreakdown?.[word] && <span className="text-xs text-rose-400 ml-1.5">({renderPhoneticWithStress(analysis.phoneticBreakdown[word])})</span>}
                                                 </span>
                                             ))}
                                         </div>
