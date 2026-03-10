@@ -478,6 +478,8 @@ const FreeSpeakMode = () => {
                                         <p className="text-sm text-indigo-900 font-sans bg-indigo-50 p-3 rounded-xl">{liveTranscript.trim()}</p>
                                     </div>
                                 )}
+
+
                             </div>
                         )}
                     </div>
@@ -587,12 +589,21 @@ const FreeSpeakMode = () => {
                                             >
                                                 <Icon icon="solar:play-circle-linear" width="18" /> Replay Yours
                                             </button>
-                                            <button
-                                                onClick={() => speakText({ text: spokenText, accentStyle, rate: autismMode ? 0.7 : 0.9 })}
-                                                className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
-                                            >
-                                                <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
-                                            </button>
+                                            <div className="flex-1 flex gap-2">
+                                                <button
+                                                    onClick={() => speakText({ text: spokenText, accentStyle, rate: autismMode ? 0.7 : 0.9 })}
+                                                    className="flex-[3] flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
+                                                >
+                                                    <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
+                                                </button>
+                                                <button
+                                                    onClick={stopSpeaking}
+                                                    className="flex-1 flex items-center justify-center bg-white border border-neutral-200 py-2.5 rounded-xl text-neutral-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm"
+                                                    title="Stop Audio"
+                                                >
+                                                    <Icon icon="solar:stop-circle-linear" width="18" />
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 )}
