@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from '@iconify/react';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { analyzePronunciation } from '../services/pronunciationService';
 import type { AnalysisResult } from '../services/pronunciationService';
 import { saveSession } from '../services/progressService';
+import { geminiLiveService } from '../services/geminiLiveService';
 
 const EXPECTED_SENTENCE = "She sells seashells by the seashore.";
 
@@ -20,6 +21,176 @@ const Trainer = () => {
     const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [apiError, setApiError] = useState<string | null>(null);
+
+    const [mode, setMode] = useState<'standard' | 'live'>('standard');
+    const [liveStatus, setLiveStatus] = useState<string>('Disconnected');
+    const audioContextRef = useRef<AudioContext | null>(null);
+    const micContextRef = useRef<AudioContext | null>(null);
+    const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
+    const liveStreamRef = useRef<MediaStream | null>(null);
+    const liveRecorderRef = useRef<ScriptProcessorNode | null>(null);
+    const [liveRecording, setLiveRecording] = useState(false);
+    const [liveTranscript, setLiveTranscript] = useState('');
+    const nextAudioTimeRef = useRef<number>(0);
+
+    const stopAudioPlayback = useCallback(() => {
+        audioQueueRef.current.forEach(source => {
+            try { source.stop(); } catch (e) { }
+        });
+        audioQueueRef.current = [];
+        nextAudioTimeRef.current = 0;
+    }, []);
+
+    useEffect(() => {
+        geminiLiveService.onStatus = setLiveStatus;
+        geminiLiveService.onTextResponse = (t) => {
+            setLiveTranscript(prev => prev + " " + t);
+        };
+        geminiLiveService.onAudioResponse = (base64Audio) => {
+            try {
+                // Decode base64 to binary
+                const binaryString = atob(base64Audio);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                // Create a separate playback context at 24kHz (Gemini output rate)
+                if (!audioContextRef.current) {
+                    audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+                }
+                const ctx = audioContextRef.current;
+
+                // Convert PCM16 LE bytes to Float32
+                const float32Data = new Float32Array(bytes.length / 2);
+                const dataView = new DataView(bytes.buffer);
+                for (let i = 0; i < float32Data.length; i++) {
+                    float32Data[i] = dataView.getInt16(i * 2, true) / 32768.0;
+                }
+
+                // Gemini Live outputs at 24kHz
+                const audioBuffer = ctx.createBuffer(1, float32Data.length, 24000);
+                audioBuffer.getChannelData(0).set(float32Data);
+
+                const source = ctx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(ctx.destination);
+
+                // Schedule sequential playback
+                if (nextAudioTimeRef.current < ctx.currentTime) {
+                    nextAudioTimeRef.current = ctx.currentTime;
+                }
+                source.start(nextAudioTimeRef.current);
+                nextAudioTimeRef.current += audioBuffer.duration;
+
+                audioQueueRef.current.push(source);
+
+                source.onended = () => {
+                    const idx = audioQueueRef.current.indexOf(source);
+                    if (idx > -1) {
+                        audioQueueRef.current.splice(idx, 1);
+                    }
+                };
+            } catch (e) {
+                console.error('[Trainer] Error playing audio response:', e);
+            }
+        };
+        geminiLiveService.onError = (err) => {
+            console.error('[Trainer] Live error:', err);
+            setLiveStatus('Error: ' + err.message);
+        };
+        return () => {
+            geminiLiveService.stopSession();
+            stopAudioPlayback();
+        };
+    }, [stopAudioPlayback]);
+
+    const handleModeSwitch = async (newMode: 'standard' | 'live') => {
+        setMode(newMode);
+        setLiveTranscript('');
+        if (newMode === 'live') {
+            await geminiLiveService.startSession();
+        } else {
+            geminiLiveService.stopSession();
+            stopAudioPlayback();
+            stopLiveRecording();
+        }
+    };
+
+    const startLiveRecording = useCallback(async () => {
+        stopAudioPlayback();
+        setLiveTranscript('');
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true }
+            });
+            liveStreamRef.current = stream;
+
+            // Use a SEPARATE AudioContext for mic capture at 16kHz
+            if (!micContextRef.current) {
+                micContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+            }
+
+            const micCtx = micContextRef.current;
+            const source = micCtx.createMediaStreamSource(stream);
+            const processor = micCtx.createScriptProcessor(4096, 1, 1);
+            source.connect(processor);
+            processor.connect(micCtx.destination);
+
+            processor.onaudioprocess = (e) => {
+                const outputData = e.outputBuffer.getChannelData(0);
+                outputData.fill(0); // Prevent mic loopback
+
+                const inputData = e.inputBuffer.getChannelData(0);
+                const pcm16 = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    const s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                const bytes = new Uint8Array(pcm16.buffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                geminiLiveService.sendAudioChunk(btoa(binary));
+            };
+            liveRecorderRef.current = processor;
+            setLiveRecording(true); // Only set AFTER mic is actually acquired!
+        } catch (e) {
+            console.error('[Trainer] Mic error:', e);
+            setLiveRecording(false);
+        }
+    }, [stopAudioPlayback]);
+
+    const stopLiveRecording = useCallback(() => {
+        if (!liveRecording && !liveRecorderRef.current) return; // Guard against double-calls
+        setLiveRecording(false);
+        geminiLiveService.sendAudioStreamEnd();
+        if (liveRecorderRef.current) {
+            liveRecorderRef.current.disconnect();
+            liveRecorderRef.current = null;
+        }
+        if (liveStreamRef.current) {
+            liveStreamRef.current.getTracks().forEach(t => t.stop());
+            liveStreamRef.current = null;
+        }
+    }, [liveRecording]);
+
+    const toggleLiveRecording = useCallback(async () => {
+        if (liveRecording) {
+            stopLiveRecording();
+        } else {
+            // Auto-reconnect if the session was disconnected
+            if (liveStatus === 'Disconnected') {
+                await geminiLiveService.startSession();
+            }
+            startLiveRecording();
+        }
+    }, [liveRecording, liveStatus, startLiveRecording, stopLiveRecording]);
+
+
+
 
     // Trigger analysis when transcript updates and recording finishes
     useEffect(() => {
@@ -69,6 +240,17 @@ const Trainer = () => {
 
     // Determine current UI states
     const statusText = () => {
+        if (mode === 'live') {
+            if (liveRecording) {
+                return <span className="text-rose-500 animate-pulse flex items-center gap-2 justify-center">
+                    <Icon icon="line-md:loading-twotone-loop" /> Listening to you... (tap mic to stop)
+                </span>;
+            }
+            return <span className="text-emerald-500 flex items-center gap-2 justify-center">
+                {liveStatus} — Tap the mic to speak
+            </span>;
+        }
+
         if (!isSupported) return <span className="text-rose-500">Browser doesn't support speech recognition.</span>;
         if (speechError) return <span className="text-rose-500">{speechError}</span>;
         if (apiError) return <span className="text-rose-500">{apiError}</span>;
@@ -103,6 +285,14 @@ const Trainer = () => {
                         <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-50 -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
 
                         <div className="text-center mb-16 relative z-10">
+                            {/* Mode Toggle */}
+                            <div className="flex bg-neutral-100 rounded-full p-1 mx-auto mb-8 w-fit relative z-10 border border-neutral-200 shadow-sm">
+                                <button onClick={() => handleModeSwitch('standard')} className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 ${mode === 'standard' ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-indigo-600' : 'text-neutral-500 hover:text-[#111]'}`}>Standard Analysis</button>
+                                <button onClick={() => handleModeSwitch('live')} className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${mode === 'live' ? 'bg-indigo-50 text-indigo-700 shadow-[0_2px_8px_rgba(99,102,241,0.2)] border border-indigo-100' : 'text-neutral-500 hover:text-[#111]'}`}>
+                                    <Icon icon="solar:microphone-3-bold-duotone" className={mode === 'live' ? 'animate-pulse text-indigo-500' : ''} /> Live AI Coach
+                                </button>
+                            </div>
+
                             <div className="text-3xl md:text-4xl font-medium tracking-tight text-[#111] flex flex-wrap justify-center gap-x-3 gap-y-4 mb-6">
                                 {words.map((word, idx) => {
                                     const isIncorrect = analysis && checkWord(word);
@@ -121,10 +311,18 @@ const Trainer = () => {
                             </div>
 
                             {/* Show transcript underneath gracefully if there is one */}
-                            {transcript && (
+                            {transcript && mode === 'standard' && (
                                 <p className="text-neutral-400 text-sm mt-8 italic font-sans break-words bg-neutral-50 p-3 rounded-xl border border-neutral-100 inline-block">
                                     You said: "{transcript}"
                                 </p>
+                            )}
+                            {liveTranscript && mode === 'live' && (
+                                <div className="mt-8 flex flex-col items-center">
+                                    <span className="text-xs uppercase tracking-widest text-indigo-400 font-bold mb-2">Live Coach Response</span>
+                                    <p className="text-indigo-900 text-base font-medium font-sans break-words bg-indigo-50/80 p-5 rounded-2xl border border-indigo-100 inline-block max-w-[90%] shadow-sm">
+                                        "{liveTranscript}"
+                                    </p>
+                                </div>
                             )}
                         </div>
 
@@ -138,22 +336,37 @@ const Trainer = () => {
                                 <Icon icon="solar:volume-loud-linear" width="24" />
                             </button>
 
-                            {/* The Hold-to-Speak button with Mobile Touch support */}
-                            <button
-                                onMouseDown={startRecording}
-                                onMouseUp={stopRecording}
-                                onMouseLeave={stopRecording} // Ensure it stops if dragged away
-                                onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
-                                onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
-                                className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-transform touch-none select-none ${isRecording ? 'bg-rose-500 mic-pulse scale-110' : 'bg-[#111] hover:scale-105'}`}
-                                disabled={isAnalyzing || !isSupported}
-                                aria-label="Hold to speak"
-                            >
-                                <Icon icon="solar:microphone-2-linear" width="28" />
-                            </button>
+                            {/* Mic Button: Click-toggle in Live mode, Hold-to-speak in Standard mode */}
+                            {mode === 'live' ? (
+                                <button
+                                    onClick={toggleLiveRecording}
+                                    className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-transform touch-none select-none ${liveRecording ? 'bg-rose-500 mic-pulse scale-110' : 'bg-[#111] hover:scale-105'}`}
+                                    aria-label={liveRecording ? "Stop speaking" : "Start speaking"}
+                                >
+                                    <Icon icon={liveRecording ? "solar:stop-bold" : "solar:microphone-2-linear"} width="28" />
+                                </button>
+                            ) : (
+                                <button
+                                    onMouseDown={startRecording}
+                                    onMouseUp={stopRecording}
+                                    onMouseLeave={stopRecording}
+                                    onTouchStart={(e) => { e.preventDefault(); startRecording(); }}
+                                    onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
+                                    className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-transform touch-none select-none ${isRecording ? 'bg-rose-500 mic-pulse scale-110' : 'bg-[#111] hover:scale-105'}`}
+                                    disabled={isAnalyzing || !isSupported}
+                                    aria-label="Hold to speak"
+                                >
+                                    <Icon icon="solar:microphone-2-linear" width="28" />
+                                </button>
+                            )}
 
-                            <button className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-colors">
-                                <Icon icon="solar:play-linear" width="24" />
+                            {/* Stop/Pause Button */}
+                            <button
+                                onClick={mode === 'live' ? stopAudioPlayback : undefined}
+                                className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-colors"
+                                title={mode === 'live' ? "Stop AI playback" : "Play track"}
+                            >
+                                <Icon icon={mode === 'live' ? "solar:stop-circle-linear" : "solar:play-linear"} width="24" />
                             </button>
                         </div>
 
