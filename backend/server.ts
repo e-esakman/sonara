@@ -1,8 +1,10 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+
 import analyzeRoute from './routes/analyze.ts';
 import progressRoute from './routes/progress.ts';
+import { generateLiveSession } from './liveSession.ts';
 
 dotenv.config();
 
@@ -18,11 +20,13 @@ app.get("/", (req, res) => {
     res.send("Sonara backend running 🚀");
 });
 
-// routes
+// API routes
 app.use('/analyze', analyzeRoute);
 app.use('/', progressRoute);
 
-// start server
+// Gemini Live session
+app.post('/live-session', generateLiveSession);
+
 app.listen(port, () => {
     console.log(`Sonara backend listening at http://localhost:${port}`);
 });
