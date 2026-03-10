@@ -255,7 +255,7 @@ const ReadAlongMode = ({ passage }: Props) => {
                     {/* Header */}
                     <div className="relative z-10 mb-5">
                         <div className="flex items-center gap-3 mb-2 flex-wrap">
-                            <span className="text-2xl">{passage.coverEmoji || '📘'}</span>
+                            <span className="text-2xl">📘</span>
                             <div>
                                 <h2 className="text-xl font-dm-sans text-[#111] tracking-tight">{passage.title}</h2>
                                 <p className="text-xs text-neutral-400 font-sans">{passage.category} • {passage.difficulty}</p>
@@ -301,14 +301,24 @@ const ReadAlongMode = ({ passage }: Props) => {
 
                     {/* Controls */}
                     <div className="relative z-10 flex justify-center items-center gap-4 sm:gap-6">
-                        <button
-                            onClick={playCorrect}
-                            className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-all hover:scale-105"
-                            title="Listen to passage"
-                            disabled={!actualText}
-                        >
-                            <Icon icon="solar:volume-loud-linear" width="22" />
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={playCorrect}
+                                className="w-12 h-12 flex items-center justify-center rounded-l-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-all hover:scale-105"
+                                title="Listen to passage"
+                                disabled={!actualText}
+                            >
+                                <Icon icon="solar:volume-loud-linear" width="22" />
+                            </button>
+                            <button
+                                onClick={stopSpeaking}
+                                className="w-12 h-12 flex items-center justify-center rounded-r-full bg-neutral-100 text-neutral-500 hover:bg-rose-50 hover:text-rose-600 transition-all hover:scale-105"
+                                title="Stop AI Coach"
+                                disabled={!actualText}
+                            >
+                                <Icon icon="solar:stop-circle-linear" width="22" />
+                            </button>
+                        </div>
 
                         <button
                             onMouseDown={handleStart}
@@ -532,12 +542,21 @@ const ReadAlongMode = ({ passage }: Props) => {
                                     >
                                         <Icon icon="solar:play-circle-linear" width="18" /> Replay Yours
                                     </button>
-                                    <button
-                                        onClick={playCorrect}
-                                        className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
-                                    >
-                                        <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
-                                    </button>
+                                    <div className="flex-1 flex gap-2">
+                                        <button
+                                            onClick={playCorrect}
+                                            className="flex-[3] flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
+                                        >
+                                            <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
+                                        </button>
+                                        <button
+                                            onClick={stopSpeaking}
+                                            className="flex-1 flex items-center justify-center bg-white border border-neutral-200 py-2.5 rounded-xl text-neutral-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm"
+                                            title="Stop Audio"
+                                        >
+                                            <Icon icon="solar:stop-circle-linear" width="18" />
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}

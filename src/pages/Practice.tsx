@@ -40,8 +40,8 @@ const Practice = () => {
                     <button
                         onClick={() => setTab('read-along')}
                         className={`px-6 py-2.5 rounded-full text-sm font-semibold font-sans transition-all duration-300 flex items-center gap-2 ${tab === 'read-along'
-                                ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-indigo-600'
-                                : 'text-neutral-500 hover:text-[#111]'
+                            ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-indigo-600'
+                            : 'text-neutral-500 hover:text-[#111]'
                             }`}
                     >
                         <Icon icon="solar:book-2-linear" width="16" />
@@ -50,8 +50,8 @@ const Practice = () => {
                     <button
                         onClick={() => setTab('free-speak')}
                         className={`px-6 py-2.5 rounded-full text-sm font-semibold font-sans transition-all duration-300 flex items-center gap-2 ${tab === 'free-speak'
-                                ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-indigo-600'
-                                : 'text-neutral-500 hover:text-[#111]'
+                            ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-indigo-600'
+                            : 'text-neutral-500 hover:text-[#111]'
                             }`}
                     >
                         <Icon icon="solar:microphone-3-bold-duotone" width="16" />
@@ -70,7 +70,7 @@ const Practice = () => {
                             >
                                 {selectedPassage ? (
                                     <>
-                                        <span className="text-2xl">{selectedPassage.coverEmoji || '📘'}</span>
+                                        <span className="text-2xl">📘</span>
                                         <div className="text-left">
                                             <p className="text-sm font-semibold text-[#111] font-sans">{selectedPassage.title}</p>
                                             <p className="text-xs text-neutral-400 font-sans">{selectedPassage.category} • {selectedPassage.difficulty}</p>
@@ -95,8 +95,8 @@ const Practice = () => {
                                                 key={cat}
                                                 onClick={() => setFilterCategory(cat)}
                                                 className={`px-3 py-1.5 rounded-full text-xs font-sans font-medium transition-all ${filterCategory === cat
-                                                        ? 'bg-[#111] text-white'
-                                                        : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
+                                                    ? 'bg-[#111] text-white'
+                                                    : 'bg-neutral-100 text-neutral-500 hover:bg-neutral-200'
                                                     }`}
                                             >
                                                 {cat}
@@ -111,11 +111,11 @@ const Practice = () => {
                                                 key={p.id}
                                                 onClick={() => selectPassage(p)}
                                                 className={`flex items-center gap-3 p-3 rounded-xl text-left transition-all hover:bg-neutral-50 border ${selectedPassage?.id === p.id
-                                                        ? 'border-indigo-200 bg-indigo-50/50'
-                                                        : 'border-transparent hover:border-neutral-200'
+                                                    ? 'border-indigo-200 bg-indigo-50/50'
+                                                    : 'border-transparent hover:border-neutral-200'
                                                     }`}
                                             >
-                                                <span className="text-xl shrink-0">{p.coverEmoji || '📘'}</span>
+                                                <span className="text-xl shrink-0">📘</span>
                                                 <div className="min-w-0">
                                                     <p className="text-sm font-medium text-[#111] font-sans truncate">{p.title}</p>
                                                     <p className="text-xs text-neutral-400 font-sans">{p.difficulty} • {p.wordCount}w</p>
@@ -136,8 +136,10 @@ const Practice = () => {
                                                     readingTime: '—',
                                                     wordCount: 0,
                                                     content: '',
-                                                    gradient: 'from-neutral-400 to-neutral-600',
-                                                    coverEmoji: '✏️',
+                                                    coverColor: 'bg-neutral-800',
+                                                    innerColor: 'bg-neutral-700',
+                                                    accentColor: 'border-neutral-600',
+                                                    patternType: 'dots',
                                                 });
                                                 setShowSelector(false);
                                             }}
