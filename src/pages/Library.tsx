@@ -3,7 +3,7 @@ import { Icon } from '@iconify/react';
 import passages, { categories } from '../data/passages';
 import type { Passage } from '../data/passages';
 import BookCard from '../components/BookCard';
-import BookShelf from '../components/BookShelf';
+
 
 const Library = () => {
     const [activeCategory, setActiveCategory] = useState<string>('All');
@@ -16,7 +16,7 @@ const Library = () => {
     });
 
     return (
-        <div className="bg-[#FAFAFA] text-gray-900 antialiased min-h-screen pt-24 pb-20 selection:bg-gray-200 font-sans">
+        <div className="bg-[#FAFAFA] text-gray-900 antialiased min-h-screen pt-36 pb-20 selection:bg-gray-200 font-sans">
             <div className="max-w-[90rem] mx-auto">
                 {/* Header */}
                 <div className="px-6 md:px-12 mb-12">
@@ -27,7 +27,7 @@ const Library = () => {
                         <h1 className="text-4xl font-semibold tracking-tight text-gray-900">Reading Library</h1>
                     </div>
                     <p className="text-lg text-gray-500 md:ml-[64px] max-w-2xl">
-                        Explore our curated collection. Swipe or scroll through the passages and practice your pronunciation.
+                        Explore our curated collection. Browse through the passages and practice your pronunciation.
                     </p>
                 </div>
 
@@ -42,8 +42,8 @@ const Library = () => {
                                         key={cat}
                                         onClick={() => setActiveCategory(cat)}
                                         className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${activeCategory === cat
-                                                ? 'bg-gray-900 text-white shadow-md shadow-gray-200'
-                                                : 'bg-gray-50 text-gray-600 border border-gray-200 hover:border-gray-300 hover:bg-white hover:shadow-sm'
+                                            ? 'bg-gray-900 text-white shadow-md shadow-gray-200'
+                                            : 'bg-gray-50 text-gray-600 border border-gray-200 hover:border-gray-300 hover:bg-white hover:shadow-sm'
                                             }`}
                                     >
                                         {cat}
@@ -59,8 +59,8 @@ const Library = () => {
                                         key={diff}
                                         onClick={() => setActiveDifficulty(diff)}
                                         className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${activeDifficulty === diff
-                                                ? 'bg-gray-900 text-white shadow-md shadow-gray-200'
-                                                : 'bg-gray-50 text-gray-600 border border-gray-200 hover:border-gray-300 hover:bg-white hover:shadow-sm'
+                                            ? 'bg-gray-900 text-white shadow-md shadow-gray-200'
+                                            : 'bg-gray-50 text-gray-600 border border-gray-200 hover:border-gray-300 hover:bg-white hover:shadow-sm'
                                             }`}
                                     >
                                         {diff}
@@ -73,13 +73,13 @@ const Library = () => {
 
                 {/* Bookshelf Grid */}
                 {filtered.length > 0 ? (
-                    <BookShelf>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-8 px-6 md:px-12 pb-16 pt-4">
                         {filtered.map((passage: Passage) => (
-                            <div key={passage.id} className="w-[280px] shrink-0 snap-start">
+                            <div key={passage.id} className="w-full">
                                 <BookCard passage={passage} />
                             </div>
                         ))}
-                    </BookShelf>
+                    </div>
                 ) : (
                     <div className="text-center py-20 px-6 md:px-12">
                         <Icon icon="lucide:book-x" className="w-16 h-16 text-gray-300 mx-auto mb-4" />

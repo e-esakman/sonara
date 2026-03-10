@@ -22,7 +22,7 @@ const Practice = () => {
     };
 
     return (
-        <div className="pt-24 min-h-screen bg-neutral-50 pb-20">
+        <div className="pt-36 min-h-screen bg-neutral-50 pb-20">
             <div className="max-w-7xl mx-auto px-4 sm:px-6">
                 {/* Header */}
                 <div className="mb-8">
