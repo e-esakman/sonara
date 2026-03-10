@@ -4,12 +4,29 @@ import { db } from '../firebaseAdmin.ts';
 
 const router = Router();
 
+// Allow only alphanumeric characters, underscores and hyphens in userId
+const SAFE_USER_ID_RE = /^[a-zA-Z0-9_-]+$/;
+
+const sanitizeUserId = (id: unknown): string => {
+    if (typeof id !== 'string' || id.trim() === '') return 'anonymous';
+    if (!SAFE_USER_ID_RE.test(id)) return 'anonymous';
+    // Limit length to a safe maximum
+    return id.slice(0, 128);
+};
+
 router.post('/session', async (req: Request, res: Response) => {
     try {
         const { userId, text, accuracyScore, fluencyScore, timestamp } = req.body;
 
+        if (!text || typeof text !== 'string' || text.length > 2000) {
+            return res.status(400).json({ error: 'Missing or invalid text in request body' });
+        }
+        if (typeof accuracyScore !== 'number' || accuracyScore < 0 || accuracyScore > 100) {
+            return res.status(400).json({ error: 'accuracyScore must be a number between 0 and 100' });
+        }
+
         const session = {
-            userId: userId || 'anonymous',
+            userId: sanitizeUserId(userId),
             text,
             accuracyScore,
             fluencyScore,
@@ -51,9 +68,9 @@ router.post('/session', async (req: Request, res: Response) => {
 
 router.get('/progress', async (req: Request, res: Response) => {
     try {
-        const { userId = 'anonymous' } = req.query;
+        const userId = sanitizeUserId(req.query.userId);
 
-        const doc = await db.collection('progress').doc(userId as string).get();
+        const doc = await db.collection('progress').doc(userId).get();
         if (!doc.exists) {
             return res.json({
                 pronunciationScore: 0,
