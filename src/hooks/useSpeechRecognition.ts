@@ -1,4 +1,4 @@
-/// <reference types="@types/dom-speech-recognition" />
+/// <reference types="dom-speech-recognition" />
 import { useState, useCallback, useRef, useEffect } from 'react';
 
 // Provide minimal fallback types to fix TS errors without full dom-speech-recognition
