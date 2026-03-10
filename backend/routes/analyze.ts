@@ -30,6 +30,11 @@ router.post('/', analyzeRateLimit, async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'transcript exceeds maximum length of 1000 characters' });
         }
 
+        const ALLOWED_ACCENTS = new Set(['American', 'British', 'Indian']);
+        if (accent !== undefined && (typeof accent !== 'string' || !ALLOWED_ACCENTS.has(accent))) {
+            return res.status(400).json({ error: `Invalid accent. Allowed values: ${[...ALLOWED_ACCENTS].join(', ')}` });
+        }
+
         const analysis = await runAnalysisPipeline(text, transcript, accent);
         res.json(analysis);
     } catch (error) {

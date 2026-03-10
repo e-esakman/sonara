@@ -69,18 +69,20 @@ export function setupLiveProxy(server: Server) {
         clientWs.on('message', (data: WebSocket.RawData) => {
             if (!geminiSession) return;
             try {
-                const msg = JSON.parse(data.toString()) as { type: string; data?: string; mimeType?: string };
+                const msg = JSON.parse(data.toString()) as {
+                    type: string;
+                    data?: string;
+                    mimeType?: string;
+                    turnComplete?: boolean;
+                };
                 if (msg.type === 'audio') {
                     geminiSession.sendRealtimeInput({
                         audio: { data: msg.data ?? '', mimeType: msg.mimeType ?? 'audio/pcm;rate=16000' }
                     });
                 } else if (msg.type === 'audioEnd') {
                     geminiSession.sendRealtimeInput({ audioStreamEnd: true });
-                } else if (msg.type === 'clientContent') {
-                    const dataObj = msg as any;
-                    if (dataObj.data && dataObj.data.turnComplete) {
-                        (geminiSession as any).sendRealtimeInput({ clientContent: { turnComplete: true } });
-                    }
+                } else if (msg.type === 'clientContent' && msg.turnComplete) {
+                    geminiSession.sendClientContent({ turnComplete: true });
                 }
             } catch (e) {
                 console.error('[LiveProxy] Failed to parse client message:', e);
