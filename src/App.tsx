@@ -8,6 +8,7 @@ import Progress from './sections/Progress';
 import Accessibility from './sections/Accessibility';
 import FAQSection from './sections/FAQSection';
 import Footer from './sections/Footer';
+import Reader from './sections/Reader';
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
       <Hero />
       <HowItWorks />
       <Trainer />
+      <Reader />
       <Features />
       <Progress />
       <Accessibility />

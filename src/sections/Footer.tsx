@@ -21,7 +21,7 @@ const Footer = () => {
             </div>
 
             <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center text-xs text-neutral-400">
-                <span className="font-sans">© 2024 Sonara AI. All rights reserved.</span>
+                <span className="font-sans">© 2026 Sonara AI. All rights reserved.</span>
                 <span className="mt-4 sm:mt-0 font-sans">Designed with precision.</span>
             </div>
         </footer>

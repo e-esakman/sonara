@@ -1,81 +1,84 @@
-import { useState, useEffect } from 'react';
-import { Mic, Play, Volume2 } from 'lucide-react';
-import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
-import { EXPECTED_SENTENCE, checkPronunciation } from '../utils/pronunciationUtils';
-import { motion } from 'framer-motion';
+import { Icon } from '@iconify/react';
 
-const PronunciationCard = () => {
-    const { isRecording, transcript, startRecording, isSupported } = useSpeechRecognition();
-    const [results, setResults] = useState<{ word: string, correct: boolean }[]>([]);
+interface PronunciationCardProps {
+    expectedText: string;
+    incorrectWords: string[];
+    isRecording: boolean;
+    isSupported: boolean;
+    isAnalyzing: boolean;
+    onStartRecording: () => void;
+    onReplayExpected: () => void;
+}
 
-    useEffect(() => {
-        if (transcript && !isRecording) {
-            setResults(checkPronunciation(transcript, EXPECTED_SENTENCE));
-        }
-    }, [transcript, isRecording]);
+const PronunciationCard = ({
+    expectedText,
+    incorrectWords,
+    isRecording,
+    isAnalyzing,
+    isSupported,
+    onStartRecording,
+    onReplayExpected
+}: PronunciationCardProps) => {
 
-    const handleMicClick = () => {
-        if (!isRecording) {
-            startRecording();
-        }
-    };
+    const words = expectedText.split(' ');
 
-    const playCorrect = () => {
-        const utterance = new SpeechSynthesisUtterance(EXPECTED_SENTENCE);
-        utterance.lang = 'en-US';
-        window.speechSynthesis.speak(utterance);
+    // Normalize word for checking
+    const checkWord = (word: string) => {
+        const clean = word.toLowerCase().replace(/[.,!?]/g, '');
+        return incorrectWords.map(w => w.toLowerCase()).includes(clean);
     };
 
     return (
-        <div className="bg-surface border border-stroke rounded-2xl p-6 md:p-10 max-w-xl mx-auto w-full relative">
-            <div className="text-center space-y-8">
-                <h3 className="text-xl md:text-2xl font-medium tracking-wide">
-                    {results.length > 0 ? (
-                        <div className="flex flex-wrap justify-center gap-x-2 leading-relaxed">
-                            {results.map((r, i) => (
-                                <span key={i} className={r.correct ? 'text-text' : 'text-pink-400 border-b border-pink-400 border-dashed pb-1'}>
-                                    {r.word}
+        <div className="bg-white rounded-3xl p-8 md:p-12 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-neutral-100 relative overflow-hidden h-full flex flex-col justify-between">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-50 -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+
+            <div className="text-center mb-16 relative z-10">
+                <div className="text-3xl md:text-4xl font-medium tracking-tight text-[#111] flex flex-wrap justify-center gap-x-3 gap-y-4 mb-6">
+                    {words.map((word, idx) => {
+                        const isIncorrect = incorrectWords.length > 0 && checkWord(word);
+                        const isCorrect = incorrectWords.length > 0 && !isIncorrect;
+
+                        return (
+                            <div key={idx} className="flex flex-col items-center gap-2 relative">
+                                <span className={`font-normal font-dm-sans ${isIncorrect ? 'text-rose-500 border-b-2 border-rose-500/30 pb-1' : (isCorrect ? 'text-emerald-700' : '')}`}>
+                                    {word}
                                 </span>
-                            ))}
-                        </div>
-                    ) : (
-                        <span className="text-text leading-relaxed">{EXPECTED_SENTENCE}</span>
-                    )}
-                </h3>
-
-                <div className="flex items-center justify-center space-x-6">
-                    <button
-                        onClick={handleMicClick}
-                        className={`p-4 rounded-full border border-stroke bg-bg transition-all duration-300 hover:scale-105 active:scale-95 ${isRecording ? 'scale-110 voice-gradient-border shadow-[0_0_30px_rgba(255,155,216,0.2)]' : ''
-                            }`}
-                        aria-label="Start recording"
-                    >
-                        {isRecording ? (
-                            <motion.div animate={{ opacity: [0.5, 1, 0.5] }} transition={{ repeat: Infinity, duration: 1.5 }}>
-                                <Mic className="w-6 h-6 text-pink-400 drop-shadow-lg" />
-                            </motion.div>
-                        ) : (
-                            <Mic className="w-6 h-6 text-text hover:text-pink-300 transition-colors" />
-                        )}
-                    </button>
-
-                    <button className="p-4 rounded-full border border-stroke bg-bg transition-all hover:scale-105 active:scale-95 group" aria-label="Replay recording">
-                        <Play className="w-6 h-6 text-text group-hover:text-pink-300 transition-colors" />
-                    </button>
-
-                    <button onClick={playCorrect} className="p-4 rounded-full border border-stroke bg-bg transition-all hover:scale-105 active:scale-95 group" aria-label="Play correct pronunciation">
-                        <Volume2 className="w-6 h-6 text-text group-hover:text-pink-300 transition-colors" />
-                    </button>
+                                {isCorrect && <Icon icon="solar:check-circle-linear" className="text-emerald-500 text-base" />}
+                                {isIncorrect && <Icon icon="solar:close-circle-linear" className="text-rose-500 text-base" />}
+                            </div>
+                        );
+                    })}
                 </div>
+            </div>
 
-                <div className="text-sm text-muted min-h-[20px]">
-                    {!isSupported && <span className="text-red-400">Speech recognition not supported in your browser</span>}
-                    {isRecording && <span className="voice-gradient-text animate-pulse font-medium">Processing...</span>}
-                    {!isRecording && isSupported && <span>Tap to start recording</span>}
-                </div>
+            <div className="flex justify-center items-center gap-6 relative z-10 mt-auto">
+                <button
+                    onClick={onReplayExpected}
+                    className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-colors"
+                    disabled={isRecording}
+                >
+                    <Icon icon="solar:volume-loud-linear" width="24" />
+                </button>
+                <button
+                    onClick={onStartRecording}
+                    className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-transform ${isRecording ? 'bg-rose-500 mic-pulse scale-110' : 'bg-[#111] hover:scale-105'}`}
+                    disabled={isRecording || isAnalyzing || !isSupported}
+                >
+                    <Icon icon="solar:microphone-2-linear" width="28" />
+                </button>
+                <button className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-colors">
+                    <Icon icon="solar:play-linear" width="24" />
+                </button>
+            </div>
+
+            <div className="text-center mt-6 text-sm font-medium font-sans min-h-[20px]">
+                {!isSupported && <span className="text-rose-500">Speech recognition not supported in your browser</span>}
+                {isRecording && <span className="text-rose-500 animate-pulse">Listening...</span>}
+                {isAnalyzing && <span className="text-indigo-500 animate-pulse">Analyzing pronunciation with AI...</span>}
+                {!isRecording && !isAnalyzing && isSupported && <span className="text-neutral-500">Tap to start recording</span>}
             </div>
         </div>
     );
-};
+}
 
 export default PronunciationCard;
