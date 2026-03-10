@@ -30,7 +30,7 @@ const ProgressDashboard = () => {
     ], [sessions, progressStats]);
 
     return (
-        <div className="pt-24 min-h-screen bg-neutral-50 pb-20">
+        <div className="pt-36 min-h-screen bg-neutral-50 pb-20">
             <div className="max-w-6xl mx-auto px-6">
                 <h1 className="text-4xl font-dm-sans text-[#111] mb-2 tracking-tight">Your Progress</h1>
                 <p className="text-neutral-500 font-sans mb-12">Track your improvement over time.</p>

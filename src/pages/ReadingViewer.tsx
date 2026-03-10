@@ -192,7 +192,7 @@ const ReadingViewer = () => {
 
     if (!passage) {
         return (
-            <div className="pt-24 min-h-screen bg-neutral-50 flex items-center justify-center">
+            <div className="pt-36 min-h-screen bg-neutral-50 flex items-center justify-center">
                 <div className="text-center">
                     <Icon icon="solar:book-2-linear" width="48" className="text-neutral-300 mb-4 mx-auto" />
                     <p className="text-neutral-500 font-sans mb-4">Passage not found.</p>
@@ -205,7 +205,7 @@ const ReadingViewer = () => {
     }
 
     return (
-        <div className="pt-24 min-h-screen bg-neutral-50 pb-20 page-enter">
+        <div className="pt-36 min-h-screen bg-neutral-50 pb-20 page-enter">
             <div className="max-w-6xl mx-auto px-4 sm:px-6">
                 {/* Back link */}
                 <Link to="/library" className="inline-flex items-center gap-1 text-neutral-500 font-sans text-sm mb-6 hover:text-[#111] transition-colors">

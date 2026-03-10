@@ -35,7 +35,7 @@ const Sessions = () => {
     };
 
     return (
-        <div className="pt-24 min-h-screen bg-neutral-50 pb-20">
+        <div className="pt-36 min-h-screen bg-neutral-50 pb-20">
             <div className="max-w-4xl mx-auto px-6">
                 <h1 className="text-4xl font-dm-sans text-[#111] mb-2 tracking-tight">Session History</h1>
                 <p className="text-neutral-500 font-sans mb-12">Review your past speaking attempts and listen to your recordings.</p>
@@ -103,8 +103,8 @@ const Sessions = () => {
                                             <button
                                                 onClick={() => handlePlay(session.sessionId, session.audioUrl)}
                                                 className={`w-12 h-12 flex items-center justify-center rounded-full transition-colors ${playingId === session.sessionId
-                                                        ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-200'
-                                                        : 'bg-neutral-100 text-[#111] hover:bg-neutral-200'
+                                                    ? 'bg-indigo-500 text-white shadow-lg shadow-indigo-200'
+                                                    : 'bg-neutral-100 text-[#111] hover:bg-neutral-200'
                                                     }`}
                                             >
                                                 <Icon icon={playingId === session.sessionId ? "solar:pause-linear" : "solar:play-linear"} width="20" />
