@@ -1,79 +1,68 @@
-import { GoogleGenAI, Modality } from '@google/genai';
+type GeminiMessagePart = { text?: string; inlineData?: { data: string; mimeType: string } };
+type GeminiServerContent = {
+    interrupted?: boolean;
+    turnComplete?: boolean;
+    modelTurn?: { parts: GeminiMessagePart[] };
+};
+type GeminiServerMessage = { serverContent?: GeminiServerContent };
+
+const BACKEND_WS_URL = import.meta.env.VITE_BACKEND_WS_URL || 'ws://localhost:3000/live-ws';
 
 class GeminiLiveService {
-    private ai: GoogleGenAI | null = null;
-    private session: any = null;
+    private ws: WebSocket | null = null;
     private isConnected: boolean = false;
 
     // Callbacks
     public onTextResponse: (text: string) => void = () => { };
-    public onAudioResponse: (audioData: string) => void = () => { }; // base64 string
+    public onAudioResponse: (audioData: string) => void = () => { };
     public onError: (error: Error) => void = () => { };
     public onStatus: (status: string) => void = () => { };
 
     public async startSession() {
         if (this.isConnected) return;
 
-        try {
-            this.onStatus("Requesting live session...");
+        this.onStatus("Connecting to Live AI Coach...");
 
-            // 1. Get credentials + config from our backend
-            const res = await fetch('http://localhost:3000/live-session', { method: 'POST' });
-            if (!res.ok) throw new Error("Failed to fetch live session credentials");
+        const ws = new WebSocket(BACKEND_WS_URL);
+        this.ws = ws;
 
-            const config = await res.json();
+        ws.onopen = () => {
+            console.log('[GeminiLive] Connected to backend proxy');
+        };
 
-            // 2. Initialize SDK
-            this.ai = new GoogleGenAI({ apiKey: config.apiKey });
-
-            this.onStatus("Connecting to Gemini Live...");
-
-            // 3. Establish the Live API WebSocket connection via SDK
-            // Official docs: https://ai.google.dev/gemini-api/docs/live-api/get-started-sdk
-            this.session = await this.ai.live.connect({
-                model: config.model,
-                callbacks: {
-                    onopen: () => {
-                        console.log('[GeminiLive] WebSocket opened');
-                    },
-                    onmessage: (message: any) => {
-                        this.handleServerMessage(message);
-                    },
-                    onerror: (e: any) => {
-                        console.error('[GeminiLive] WebSocket error:', e);
-                        this.onError(new Error(e?.message || 'WebSocket error'));
-                    },
-                    onclose: (e: any) => {
-                        console.log('[GeminiLive] WebSocket closed:', e?.reason);
-                        this.isConnected = false;
-                        this.onStatus("Disconnected");
-                    }
-                },
-                config: {
-                    responseModalities: [Modality.AUDIO],
-                    systemInstruction: { parts: [{ text: config.systemInstruction }] }
+        ws.onmessage = (event: MessageEvent<string>) => {
+            try {
+                const msg = JSON.parse(event.data) as { type: string; status?: string; message?: string; payload?: GeminiServerMessage };
+                if (msg.type === 'status') {
+                    this.isConnected = true;
+                    this.onStatus(msg.status ?? 'Connected');
+                } else if (msg.type === 'error') {
+                    this.onError(new Error(msg.message ?? 'Unknown error'));
+                } else if (msg.type === 'message' && msg.payload) {
+                    this.handleServerMessage(msg.payload);
                 }
-            });
+            } catch (e) {
+                console.error('[GeminiLive] Failed to parse message:', e);
+            }
+        };
 
-            this.isConnected = true;
-            this.onStatus("Connected to Live AI Coach");
+        ws.onerror = () => {
+            this.onError(new Error('WebSocket connection error'));
+        };
 
-        } catch (error: any) {
-            console.error("Gemini Live Service Error:", error);
-            this.onError(error);
-            this.stopSession();
-        }
+        ws.onclose = () => {
+            this.isConnected = false;
+            this.ws = null;
+            this.onStatus("Disconnected");
+        };
     }
 
     /**
-     * Handle messages from the Gemini Live API.
-     * The SDK already parses the WebSocket message into a LiveServerMessage object.
+     * Handle messages forwarded from the Gemini Live API via the backend proxy.
      * Structure: message.serverContent?.modelTurn?.parts[]
-     * Each part can have: part.text, part.inlineData.data (base64 audio)
      */
-    private handleServerMessage(message: any) {
+    private handleServerMessage(message: GeminiServerMessage) {
         try {
-            // The message IS already a LiveServerMessage object from the SDK
             const content = message?.serverContent;
 
             if (content?.interrupted) {
@@ -87,7 +76,6 @@ class GeminiLiveService {
                         this.onTextResponse(part.text);
                     }
                     if (part.inlineData?.data) {
-                        // Audio data is already a base64 string from the SDK
                         this.onAudioResponse(part.inlineData.data);
                     }
                 }
@@ -102,46 +90,37 @@ class GeminiLiveService {
     }
 
     /**
-     * Send an audio chunk to Gemini Live.
-     * Official SDK format: session.sendRealtimeInput({ audio: { data: base64, mimeType: '...' } })
+     * Send an audio chunk to the backend proxy, which forwards it to Gemini Live.
      */
     public sendAudioChunk(base64Pcm: string) {
-        if (!this.isConnected || !this.session) return;
-
+        if (!this.isConnected || !this.ws) return;
         try {
-            this.session.sendRealtimeInput({
-                audio: {
-                    data: base64Pcm,
-                    mimeType: "audio/pcm;rate=16000"
-                }
-            });
-        } catch (err: any) {
+            this.ws.send(JSON.stringify({
+                type: 'audio',
+                data: base64Pcm,
+                mimeType: 'audio/pcm;rate=16000'
+            }));
+        } catch (err) {
             console.error("[GeminiLive] Failed to send audio chunk:", err);
         }
     }
 
     /**
-     * Signal end of audio stream. When using sendRealtimeInput, 
-     * VAD handles turn detection automatically. This just signals
-     * we've stopped sending audio.
+     * Signal end of audio stream to the backend proxy.
      */
     public sendAudioStreamEnd() {
-        if (!this.isConnected || !this.session) return;
+        if (!this.isConnected || !this.ws) return;
         try {
-            this.session.sendRealtimeInput({
-                audioStreamEnd: true
-            });
-        } catch (err: any) {
+            this.ws.send(JSON.stringify({ type: 'audioEnd' }));
+        } catch (err) {
             console.error("[GeminiLive] Failed to send audio stream end:", err);
         }
     }
 
     public stopSession() {
-        if (this.session) {
-            try {
-                this.session.close();
-            } catch (e) { }
-            this.session = null;
+        if (this.ws) {
+            try { this.ws.close(); } catch { /* intentionally ignored */ }
+            this.ws = null;
         }
         this.isConnected = false;
         this.onStatus("Disconnected");
