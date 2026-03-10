@@ -79,6 +79,10 @@
         animation: pulse-soft 3s ease-in-out infinite;
     }
 
+    .mic-recording {
+        animation: mic-glow 1.5s ease-in-out infinite;
+    }
+
     .cursor-dot,
     .cursor-outline {
         position: fixed;
@@ -110,6 +114,55 @@
         height: 48px;
         background-color: rgba(17, 17, 17, 0.05);
         border-color: transparent;
+    }
+
+    /* Book card 3D lift */
+    .book-card {
+        transform: perspective(800px) rotateY(-2deg);
+        transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1), box-shadow 0.4s ease;
+    }
+
+    .book-card:hover {
+        transform: perspective(800px) rotateY(0deg) translateY(-8px);
+    }
+
+    /* Book spine shadow */
+    .book-spine {
+        position: relative;
+    }
+
+    .book-spine::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 12px;
+        height: 100%;
+        background: linear-gradient(90deg, rgba(0, 0, 0, 0.15) 0%, transparent 100%);
+        border-radius: 12px 0 0 12px;
+        pointer-events: none;
+        z-index: 2;
+    }
+
+    /* Score counter animation */
+    .score-animate {
+        animation: scoreCount 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+
+    /* Page turn feel */
+    .page-enter {
+        animation: pageSlideIn 0.5s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+    }
+
+    /* Autism friendly mode */
+    .autism-mode {
+        letter-spacing: 0.03em;
+        line-height: 2 !important;
+    }
+
+    .autism-mode * {
+        transition-duration: 0.5s !important;
+        animation-duration: 0s !important;
     }
 }
 
@@ -165,4 +218,112 @@
         transform: scale(1.05);
         opacity: 0.8;
     }
+}
+
+@keyframes mic-glow {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 0 16px rgba(239, 68, 68, 0);
+    }
+}
+
+@keyframes scoreCount {
+    0% {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+
+    60% {
+        transform: scale(1.15);
+    }
+
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes pageSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(30px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Focus Reading Mode — removes distractions, increases readability */
+.focus-mode {
+    --color-bg: #FAFAF7;
+}
+
+.focus-mode body,
+body.focus-mode {
+    background-color: #FAFAF7;
+}
+
+.focus-mode * {
+    animation-duration: 0s !important;
+    transition-duration: 0.1s !important;
+}
+
+.focus-mode .cursor-dot,
+.focus-mode .cursor-outline {
+    display: none !important;
+}
+
+.focus-mode p,
+.focus-mode span {
+    font-size: 1.125rem;
+    line-height: 1.9;
+}
+
+/* Pronunciation heatmap word colors */
+.word-correct {
+    color: #047857;
+    border-bottom: 2px solid #34d399;
+}
+
+.word-incorrect {
+    color: #dc2626;
+    background-color: #fef2f2;
+    border-bottom: 2px solid #f87171;
+    border-radius: 2px;
+    padding: 0 2px;
+}
+
+.word-unclear {
+    color: #d97706;
+    background-color: #fffbeb;
+    border-bottom: 2px solid #fbbf24;
+    border-radius: 2px;
+    padding: 0 2px;
+}
+
+/* Speaking pace meter */
+.pace-meter {
+    transition: width 0.5s ease-out;
+}
+
+/* Smooth state transitions */
+.state-transition {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.state-enter {
+    opacity: 0;
+    transform: translateY(8px);
+}
+
+.state-visible {
+    opacity: 1;
+    transform: translateY(0);
 }

@@ -1,4 +1,5 @@
 import { Icon } from '@iconify/react';
+import { Link } from 'react-router-dom';
 
 const Hero = () => {
     return (
@@ -56,13 +57,13 @@ const Hero = () => {
                     Sonara is an AI pronunciation coach that listens, analyzes your speech, and helps you sound natural in any language.
                 </p>
                 <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                    <button className="w-full sm:w-auto bg-[#111] text-white px-8 py-4 rounded-full font-medium tracking-tight hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 font-sans">
+                    <Link to="/library" className="w-full sm:w-auto bg-[#111] text-white px-8 py-4 rounded-full font-medium tracking-tight hover:bg-neutral-800 transition-colors flex items-center justify-center gap-2 font-sans">
                         Start speaking
                         <Icon icon="solar:arrow-right-linear" width="20" />
-                    </button>
-                    <button className="w-full sm:w-auto bg-white text-[#111] border border-neutral-200 px-8 py-4 rounded-full font-medium tracking-tight hover:bg-neutral-50 transition-colors flex items-center justify-center gap-2 font-sans">
-                        See how it works
-                    </button>
+                    </Link>
+                    <Link to="/practice" className="w-full sm:w-auto bg-white text-[#111] border border-neutral-200 px-8 py-4 rounded-full font-medium tracking-tight hover:bg-neutral-50 transition-colors flex items-center justify-center gap-2 font-sans">
+                        Try quick practice
+                    </Link>
                 </div>
             </div>
         </header>

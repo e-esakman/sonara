@@ -5,13 +5,16 @@ import { analyzePronunciation } from '../services/pronunciationService';
 import type { AnalysisResult } from '../services/pronunciationService';
 import { saveSession } from '../services/progressService';
 import { geminiLiveService } from '../services/geminiLiveService';
+import { useStore } from '../store/useStore';
 
 const EXPECTED_SENTENCE = "She sells seashells by the seashore.";
 
 const Trainer = () => {
+    const { addSession } = useStore();
     const {
         isRecording,
         transcript,
+        audioUrl,
         isSupported,
         error: speechError,
         startRecording,
@@ -22,6 +25,7 @@ const Trainer = () => {
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [apiError, setApiError] = useState<string | null>(null);
 
+    const [spokenText, setSpokenText] = useState("");
     const [mode, setMode] = useState<'standard' | 'live'>('standard');
     const [liveStatus, setLiveStatus] = useState<string>('Disconnected');
     const audioContextRef = useRef<AudioContext | null>(null);
@@ -104,6 +108,10 @@ const Trainer = () => {
             stopAudioPlayback();
         };
     }, [stopAudioPlayback]);
+
+    useEffect(() => {
+        if (transcript) setSpokenText(transcript);
+    }, [transcript]);
 
     const handleModeSwitch = async (newMode: 'standard' | 'live') => {
         setMode(newMode);
@@ -198,15 +206,34 @@ const Trainer = () => {
             if (transcript && !isRecording) {
                 setIsAnalyzing(true);
                 setApiError(null);
+                setSpokenText(transcript);
                 try {
                     const result = await analyzePronunciation(EXPECTED_SENTENCE, transcript);
                     setAnalysis(result);
 
-                    // Fire-and-forget session save
+                    const fScore = 85;
+                    const cScore = Math.round(result.accuracyScore * 0.5 + fScore * 0.3 + 80 * 0.2);
+
+                    // Save to global store
+                    addSession({
+                        passageId: 'trainer-default',
+                        expectedText: EXPECTED_SENTENCE,
+                        spokenTranscript: transcript,
+                        pronunciationScore: result.accuracyScore,
+                        fluencyScore: fScore,
+                        confidenceScore: Math.min(100, cScore),
+                        wordsPerMinute: Math.round(transcript.split(' ').length / 0.1),
+                        pauseCount: 0,
+                        incorrectWords: result.incorrectWords,
+                        accentInfluence: result.accentInfluence,
+                        audioUrl: audioUrl || undefined,
+                    });
+
+                    // Fire-and-forget legacy backend save
                     saveSession({
                         text: EXPECTED_SENTENCE,
                         accuracyScore: result.accuracyScore,
-                        fluencyScore: 85,
+                        fluencyScore: fScore,
                         timestamp: new Date()
                     }).catch(console.error);
 
@@ -225,13 +252,22 @@ const Trainer = () => {
     }, [transcript, isRecording]);
 
     const playCorrect = () => {
-        const utterance = new SpeechSynthesisUtterance(EXPECTED_SENTENCE);
-        utterance.lang = 'en-US';
-        window.speechSynthesis.speak(utterance);
+        if (mode === 'live') return;
+
+        if (audioUrl) {
+            const audio = new Audio(audioUrl);
+            audio.play().catch(console.error);
+        } else {
+            // fallback if no audio recorded
+            const utterance = new SpeechSynthesisUtterance(EXPECTED_SENTENCE);
+            utterance.lang = 'en-US';
+            window.speechSynthesis.speak(utterance);
+        }
     };
 
     // Calculate word correctness safely
-    const words = EXPECTED_SENTENCE.split(' ');
+    const displaySentence = spokenText || EXPECTED_SENTENCE;
+    const words = displaySentence.split(' ');
 
     const checkWord = (word: string) => {
         const clean = word.toLowerCase().replace(/[.,!?]/g, '');

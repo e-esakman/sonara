@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 
 // Extend window object to include the speech recognition APIs
 declare global {
@@ -11,7 +11,10 @@ declare global {
 export const useSpeechRecognition = () => {
     const [isRecording, setIsRecording] = useState(false);
     const [transcript, setTranscript] = useState('');
+    const [audioUrl, setAudioUrl] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<BlobPart[]>([]);
     const recognitionRef = useRef<any>(null);
     const isRecordingRef = useRef(false);
     const startTimeRef = useRef(0);
@@ -80,7 +83,28 @@ export const useSpeechRecognition = () => {
         // Ensure browser has permission before starting to prevent the "Hold-to-speak permission flash" bug
         if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
             try {
-                await navigator.mediaDevices.getUserMedia({ audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // Set up MediaRecorder to capture the recording
+                const mediaRecorder = new MediaRecorder(stream);
+                audioChunksRef.current = [];
+                setAudioUrl(null);
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunksRef.current.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                    const url = URL.createObjectURL(audioBlob);
+                    setAudioUrl(url);
+                    // Stop tracks to release microphone if wanted, but recognition might need it
+                };
+
+                mediaRecorderRef.current = mediaRecorder;
+
             } catch (err) {
                 setError('Microphone access denied. Please allow microphone access.');
                 return;
@@ -92,6 +116,7 @@ export const useSpeechRecognition = () => {
         if (recognition) {
             try {
                 recognition.start();
+                mediaRecorderRef.current?.start();
                 setIsRecording(true);
                 isRecordingRef.current = true;
                 startTimeRef.current = Date.now();
@@ -120,18 +145,26 @@ export const useSpeechRecognition = () => {
 
         if (recognitionRef.current && isRecordingRef.current) {
             if (timeElapsed < 500) {
-                // It was a quick tap, so just let the browser's auto silence detection wrap it up.
-                // We don't call stop().
                 console.log("Quick tap detected. Letting silence detection end recording.");
             } else {
                 recognitionRef.current.stop();
+                if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+                    mediaRecorderRef.current.stop();
+                }
             }
-            // we do NOT set isRecording false here, we wait for onend or onresult to do it cleanly.
         }
     }, []);
 
+    // Also handle when recognition ends naturally
+    useEffect(() => {
+        if (!isRecording && mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+            mediaRecorderRef.current.stop();
+        }
+    }, [isRecording]);
+
     return {
         transcript,
+        audioUrl,
         isRecording,
         isSupported,
         error,
