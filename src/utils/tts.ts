@@ -22,7 +22,7 @@ const getVoice = (accentStyle: AccentStyle): SpeechSynthesisVoice | null => {
             targetVoices = voices.filter(v => v.lang.includes('en-US'));
             break;
         case 'Indian':
-            targetVoices = voices.filter(v => v.lang.includes('en-IN') || v.lang.includes('en-IN') || v.lang.includes('hi-IN'));
+            targetVoices = voices.filter(v => v.lang.includes('en-IN') || v.lang.includes('hi-IN'));
             break;
     }
 
@@ -39,21 +39,7 @@ export const speakText = ({ text, accentStyle, rate = 1, onBoundary, onEnd }: Sp
 
     const utterance = new SpeechSynthesisUtterance(text);
 
-    // Ensure voices are loaded (Chrome sometimes needs this on first load)
-    if (window.speechSynthesis.getVoices().length === 0) {
-        window.speechSynthesis.onvoiceschanged = () => {
-            const voice = getVoice(accentStyle);
-            if (voice) utterance.voice = voice;
-            utterance.rate = rate;
-            window.speechSynthesis.speak(utterance);
-        };
-    } else {
-        const voice = getVoice(accentStyle);
-        if (voice) utterance.voice = voice;
-        utterance.rate = rate;
-        window.speechSynthesis.speak(utterance);
-    }
-
+    // Attach event handlers before calling speak to avoid missing early events
     if (onBoundary) {
         utterance.onboundary = (event) => {
             if (event.name === 'word') {
@@ -64,6 +50,23 @@ export const speakText = ({ text, accentStyle, rate = 1, onBoundary, onEnd }: Sp
 
     if (onEnd) {
         utterance.onend = onEnd;
+    }
+
+    // Ensure voices are loaded (Chrome sometimes needs this on first load)
+    if (window.speechSynthesis.getVoices().length === 0) {
+        window.speechSynthesis.onvoiceschanged = () => {
+            // Clear the handler after first invocation to avoid replaying
+            window.speechSynthesis.onvoiceschanged = null;
+            const voice = getVoice(accentStyle);
+            if (voice) utterance.voice = voice;
+            utterance.rate = rate;
+            window.speechSynthesis.speak(utterance);
+        };
+    } else {
+        const voice = getVoice(accentStyle);
+        if (voice) utterance.voice = voice;
+        utterance.rate = rate;
+        window.speechSynthesis.speak(utterance);
     }
 };
 

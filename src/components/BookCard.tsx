@@ -88,7 +88,7 @@ const BookCard = ({ passage }: Props) => {
                 style={{ backgroundColor: passage.coverColor }}
             >
                 <div
-                    className="relative h-full w-full rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.08)] overflow-hidden flex flex-col bg-white/90"
+                    className="relative h-full w-full rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col bg-white/90"
                     style={{ backgroundColor: passage.innerColor || '#FFFFFF' }}
                 >
                     <h3

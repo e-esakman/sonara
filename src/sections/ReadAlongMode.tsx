@@ -146,20 +146,24 @@ const ReadAlongMode = ({ passage }: Props) => {
     const playCorrect = () => {
         setCurrentReadingWordIdx(0);
 
+        // Use the same sliced text for TTS and offset calculation
+        const ttsText = actualText.slice(0, 300);
+
         // Count words to map charIndex to wordIndex roughly
-        const words = actualText.split(/\s+/);
+        const words = ttsText.split(/\s+/);
         let charOffsets = [0];
         for (let i = 0; i < words.length; i++) {
             charOffsets.push(charOffsets[charOffsets.length - 1] + words[i].length + 1);
         }
 
         speakText({
-            text: actualText.slice(0, 300),
+            text: ttsText,
             accentStyle,
             rate: autismMode ? 0.7 : 0.9,
             onBoundary: (charIndex: number) => {
-                const wIdx = charOffsets.findIndex(off => off > charIndex) - 1;
-                if (wIdx >= 0) setCurrentReadingWordIdx(wIdx);
+                const nextIdx = charOffsets.findIndex(off => off > charIndex);
+                const wIdx = nextIdx === -1 ? Math.max(0, charOffsets.length - 2) : Math.max(0, nextIdx - 1);
+                setCurrentReadingWordIdx(wIdx);
             },
             onEnd: () => setCurrentReadingWordIdx(-1)
         });

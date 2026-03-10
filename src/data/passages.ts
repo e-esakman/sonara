@@ -10,6 +10,8 @@ export interface Passage {
     innerColor: string;
     accentColor: string;
     patternType: string;
+    gradient?: string;
+    coverEmoji?: string;
 }
 
 const contentSample1 = `The world is full of small miracles that most people walk past without noticing. The way morning sunlight filters through a kitchen window, casting golden rectangles on the floor. The sound of rain tapping gently on a rooftop, each drop creating a tiny percussion symphony. The smell of fresh bread drifting from a bakery, pulling you in like an invisible thread. These moments are everywhere if you learn to pay attention. We spend so much time racing toward the next goal that we forget to appreciate what is right in front of us. Happiness is not always found in grand achievements or exotic destinations. Sometimes it lives in a warm cup of coffee on a cold morning, a genuine smile from a stranger, or the simple satisfaction of finishing a good book. Slow down. Look around. The beauty of ordinary life is extraordinary when you truly see it.`;
