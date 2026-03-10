@@ -13,24 +13,30 @@ if (serviceAccountKey) {
             credential: admin.credential.cert(payload)
         });
         console.log("Firebase Admin Initialized successfully.");
-    } catch (e) {
-        console.warn("Failed to parse FIREBASE_SERVICE_ACCOUNT variable as JSON.");
+    } catch {
+        console.warn(
+            "⚠️  Failed to parse FIREBASE_SERVICE_ACCOUNT as JSON. " +
+            "Progress data will not be persisted. " +
+            "Ensure the value is a valid JSON string (see backend/.env.example)."
+        );
     }
 } else {
-    console.warn("No FIREBASE_SERVICE_ACCOUNT found in environment. Mocking Firestore for demo.");
+    console.warn(
+        "⚠️  FIREBASE_SERVICE_ACCOUNT is not set. " +
+        "Progress data will not be persisted. " +
+        "Set this variable in backend/.env to enable persistent progress tracking."
+    );
 }
 
-// Fallback mock export if real DB fails or isn't configured
+// Fallback no-op mock used when Firebase is not configured.
+// Returns empty/zero data so the app is functional but no fake scores are shown.
 const mockDb = {
-    collection: (name: string) => ({
-        doc: (id: string) => ({
-            get: async () => ({
-                exists: true,
-                data: () => ({ streak: 14, wordsPracticed: 1200, averageScore: 90 })
-            }),
-            set: async (data: any, options?: any) => Promise.resolve(),
+    collection: () => ({
+        doc: () => ({
+            get: async () => ({ exists: false, data: () => undefined }),
+            set: async () => Promise.resolve(),
         }),
-        add: async (data: any) => Promise.resolve({ id: 'mock-id' })
+        add: async () => Promise.resolve({ id: 'mock-id' })
     })
 };
 

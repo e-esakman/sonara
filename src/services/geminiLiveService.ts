@@ -120,7 +120,7 @@ class GeminiLiveService {
     public interrupt() {
         if (!this.isConnected || !this.ws) return;
         try {
-            this.ws.send(JSON.stringify({ type: 'clientContent', data: { turnComplete: true } }));
+            this.ws.send(JSON.stringify({ type: 'clientContent', turnComplete: true }));
         } catch (err) {
             console.error("[GeminiLive] Failed to send interrupt:", err);
         }

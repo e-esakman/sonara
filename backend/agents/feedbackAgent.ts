@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { callGeminiWithRetry } from './geminiRetry.ts';
 
 const apiKey = process.env.GEMINI_API_KEY;
 const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
@@ -8,21 +9,6 @@ export interface FeedbackResult {
     tips: string[];
     phoneticBreakdown: { [word: string]: string };
     accentInfluence?: string;
-}
-
-// Keep the existing retry logic specifically for the Feedback Agent
-async function callGeminiWithRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
-    try {
-        return await fn();
-    } catch (err: any) {
-        const isRateLimit = err.status === 429 || err.message?.includes('429') || err.message?.toLowerCase().includes('quota') || err.message?.toLowerCase().includes('rate limit');
-        if (isRateLimit && retries > 0) {
-            console.log(`[FeedbackAgent] Gemini rate limited. Retrying in 2 seconds... (${retries} retries left)`);
-            await new Promise(r => setTimeout(r, 2000));
-            return callGeminiWithRetry(fn, retries - 1);
-        }
-        throw err;
-    }
 }
 
 export async function generateFeedback(
@@ -85,7 +71,7 @@ No markdown, just the JSON string, and no extra text.
             })
         );
 
-        let text = response.text || "{}";
+        const text = response.text || "{}";
 
         // Strip markdown code blocks if the model ignored responseMimeType
         let jsonStr = text;
@@ -96,11 +82,12 @@ No markdown, just the JSON string, and no extra text.
         }
 
         return JSON.parse(jsonStr) as FeedbackResult;
-    } catch (error: any) {
+    } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
         console.error("Gemini API error in Feedback Agent:", error);
         return {
             phoneticBreakdown: {},
-            tips: [`Error communicating with AI: ${error.message || error}`],
+            tips: [`Error communicating with AI: ${message}`],
             suggestions: [],
             accentInfluence: "Unknown"
         };
