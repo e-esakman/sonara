@@ -5,6 +5,8 @@ import { runAnalysisPipeline } from '../agents/analysisPipeline.ts';
 
 const router = Router();
 
+const ALLOWED_ACCENTS = new Set(['American', 'British', 'Indian']);
+
 const analyzeRateLimit = rateLimit({
     windowMs: 60 * 1000,
     max: 15,
@@ -28,6 +30,11 @@ router.post('/', analyzeRateLimit, async (req: Request, res: Response) => {
         }
         if (transcript.length > 1000) {
             return res.status(400).json({ error: 'transcript exceeds maximum length of 1000 characters' });
+        }
+
+
+        if (accent !== undefined && (typeof accent !== 'string' || !ALLOWED_ACCENTS.has(accent))) {
+            return res.status(400).json({ error: `Invalid accent. Allowed values: ${[...ALLOWED_ACCENTS].join(', ')}` });
         }
 
         const analysis = await runAnalysisPipeline(text, transcript, accent);

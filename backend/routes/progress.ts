@@ -83,7 +83,7 @@ router.get('/progress', async (req: Request, res: Response) => {
 
         res.json({
             pronunciationScore: data?.averageScore || 0,
-            fluencyScore: 88, // mock fluency 
+            fluencyScore: data?.averageScore || 0,
             streak: data?.streak || 0,
             wordsPracticed: data?.wordsPracticed || 0
         });
