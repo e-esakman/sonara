@@ -105,15 +105,24 @@ class GeminiLiveService {
         }
     }
 
-    /**
-     * Signal end of audio stream to the backend proxy.
-     */
     public sendAudioStreamEnd() {
         if (!this.isConnected || !this.ws) return;
         try {
             this.ws.send(JSON.stringify({ type: 'audioEnd' }));
         } catch (err) {
             console.error("[GeminiLive] Failed to send audio stream end:", err);
+        }
+    }
+
+    /**
+     * Send interrupt signal to cancel AI generation.
+     */
+    public interrupt() {
+        if (!this.isConnected || !this.ws) return;
+        try {
+            this.ws.send(JSON.stringify({ type: 'clientContent', data: { turnComplete: true } }));
+        } catch (err) {
+            console.error("[GeminiLive] Failed to send interrupt:", err);
         }
     }
 

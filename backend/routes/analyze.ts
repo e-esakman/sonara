@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import rateLimit from 'express-rate-limit';
-import { analyzePronunciation } from '../geminiAgent.ts';
+import { runAnalysisPipeline } from '../agents/analysisPipeline.ts';
 
 const router = Router();
 
@@ -15,7 +15,7 @@ const analyzeRateLimit = rateLimit({
 
 router.post('/', analyzeRateLimit, async (req: Request, res: Response) => {
     try {
-        const { text, transcript } = req.body;
+        const { text, transcript, accent } = req.body;
 
         if (!text || typeof text !== 'string') {
             return res.status(400).json({ error: 'Missing or invalid text in request body' });
@@ -30,7 +30,7 @@ router.post('/', analyzeRateLimit, async (req: Request, res: Response) => {
             return res.status(400).json({ error: 'transcript exceeds maximum length of 1000 characters' });
         }
 
-        const analysis = await analyzePronunciation(text, transcript);
+        const analysis = await runAnalysisPipeline(text, transcript, accent);
         res.json(analysis);
     } catch (error) {
         console.error('Error in /analyze route:', error);

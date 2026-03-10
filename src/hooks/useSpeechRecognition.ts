@@ -72,7 +72,7 @@ export const useSpeechRecognition = () => {
             const recognition = new SpeechRecognitionAPI();
 
             // Configure based on requirements
-            recognition.continuous = false;
+            recognition.continuous = true;
             recognition.interimResults = true;
             recognition.lang = 'en-US';
 

@@ -69,7 +69,7 @@ const ReadAlongMode = ({ passage }: Props) => {
             setShowScores(false);
 
             try {
-                const result = await analyzePronunciation(actualText, transcript, (attempt) => {
+                const result = await analyzePronunciation(actualText, transcript, accentStyle, (attempt) => {
                     setRetryMsg(`AI coach is busy, retrying... (attempt ${attempt})`);
                 });
                 setRetryMsg(null);
@@ -185,12 +185,15 @@ const ReadAlongMode = ({ passage }: Props) => {
             const clean = word.toLowerCase().replace(/[.,!?;:'"]/g, '');
             const isIncorrect = analysis.incorrectWords.map(w => w.toLowerCase()).includes(clean);
             const isUnclear = analysis.unclearWords?.map(w => w.toLowerCase()).includes(clean);
+            const isUnread = analysis.unreadWords?.map(w => w.toLowerCase()).includes(clean);
 
             let className = 'inline transition-colors duration-300 ';
             if (isIncorrect) {
                 className += 'text-rose-600 bg-rose-50 px-0.5 rounded border-b-2 border-rose-400 font-medium';
             } else if (isUnclear) {
                 className += 'text-amber-600 bg-amber-50 px-0.5 rounded border-b-2 border-amber-300 font-medium';
+            } else if (isUnread) {
+                className += 'text-neutral-400 opacity-60 font-medium';
             } else {
                 className += 'text-emerald-700';
             }
@@ -205,12 +208,18 @@ const ReadAlongMode = ({ passage }: Props) => {
                     key={idx}
                     className={className}
                     style={{ marginRight: '0.3em', whiteSpace: 'nowrap' }}
-                    title={isIncorrect ? 'Mispronounced' : isUnclear ? 'Unclear' : 'Correct'}
+                    title={isIncorrect ? 'Mispronounced' : isUnclear ? 'Unclear' : isUnread ? 'Unread' : 'Correct'}
                 >
                     {word}
                 </span>
             );
         });
+    };
+
+    const renderPhoneticWithStress = (phonetic: string) => {
+        return phonetic.split(/([A-Z]+)/).map((part, i) =>
+            /[A-Z]/.test(part) ? <span key={i} className="font-bold tracking-wider">{part}</span> : <span key={i}>{part}</span>
+        );
     };
 
     // ─── Pace indicator ──────────────────────────────────────────
@@ -410,7 +419,10 @@ const ReadAlongMode = ({ passage }: Props) => {
                             <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center">
                                 <Icon icon="solar:chat-round-dots-bold" width="16" className="text-white" />
                             </div>
-                            <span className="text-sm font-semibold text-[#111] font-sans">AI Coach Feedback</span>
+                            <div className="flex flex-col">
+                                <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
+                                <span className="text-xs text-neutral-500 font-sans">AI Coach Feedback</span>
+                            </div>
                         </div>
 
                         {/* Scores */}
@@ -456,7 +468,7 @@ const ReadAlongMode = ({ passage }: Props) => {
                                         <span key={i} className="text-sm tracking-tight text-rose-500 font-medium font-sans bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100">
                                             {word}
                                             {analysis.phoneticBreakdown?.[word] && (
-                                                <span className="text-xs text-rose-400 ml-1.5">({analysis.phoneticBreakdown[word]})</span>
+                                                <span className="text-xs text-rose-400 ml-1.5">({renderPhoneticWithStress(analysis.phoneticBreakdown[word])})</span>
                                             )}
                                         </span>
                                     ))}

@@ -4,6 +4,7 @@ export interface AnalysisResult {
     accuracyScore: number;
     incorrectWords: string[];
     unclearWords?: string[];
+    unreadWords?: string[];
     phoneticBreakdown: { [key: string]: string };
     tips: string[];
     accentInfluence?: string;
@@ -62,6 +63,7 @@ const MIN_WORDS_FOR_ANALYSIS = 4;
 export const analyzePronunciation = async (
     expectedText: string,
     transcript: string,
+    accent?: string,
     onRetry?: (attempt: number) => void
 ): Promise<AnalysisResult> => {
     // Validate minimum word count
@@ -83,7 +85,7 @@ export const analyzePronunciation = async (
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: expectedText, transcript }),
+                body: JSON.stringify({ text: expectedText, transcript, accent }),
             },
             onRetry
         );
@@ -134,8 +136,26 @@ function deriveUnclearWords(
 
     const unclear: string[] = [];
 
-    // Words in expected that were not spoken at all (skipped) — mark as unclear
-    for (const word of expectedWords) {
+    // Find roughly how far the user read into the expected text
+    let lastMatchedIndex = -1;
+    for (let i = Math.max(0, spokenWords.length - 10); i < spokenWords.length; i++) {
+        const sw = spokenWords[i];
+        if (sw.length < 3) continue;
+        for (let j = expectedWords.length - 1; j >= 0; j--) {
+            if (expectedWords[j] === sw || expectedWords[j].includes(sw) || sw.includes(expectedWords[j])) {
+                if (j > lastMatchedIndex) {
+                    lastMatchedIndex = j;
+                }
+                break;
+            }
+        }
+    }
+
+    const maxEvaluationIndex = lastMatchedIndex !== -1 ? lastMatchedIndex + 3 : spokenWords.length + 5;
+    const evaluatedExpectedWords = expectedWords.slice(0, maxEvaluationIndex);
+
+    // Words in the attempted portion that were skipped or slurred
+    for (const word of evaluatedExpectedWords) {
         if (word.length < 2) continue;
         if (incorrectSet.has(word)) continue;
 
@@ -143,16 +163,12 @@ function deriveUnclearWords(
         const wasSpoken = spokenWords.some(sw => sw === word);
         const wasFuzzy = spokenWords.some(sw => {
             if (sw.length < 2 || word.length < 2) return false;
-            const maxLen = Math.max(sw.length, word.length);
-            let matches = 0;
-            for (let i = 0; i < Math.min(sw.length, word.length); i++) {
-                if (sw[i] === word[i]) matches++;
-            }
-            const similarity = matches / maxLen;
-            return similarity >= 0.5 && similarity < 0.85;
+            // simple substring check
+            if (word.includes(sw) || sw.includes(word)) return true;
+            return false;
         });
 
-        if (!wasSpoken && wasFuzzy) {
+        if (!wasSpoken && !wasFuzzy) {
             unclear.push(word);
         }
     }

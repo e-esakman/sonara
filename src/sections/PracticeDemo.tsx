@@ -4,8 +4,8 @@ import { Icon } from '@iconify/react';
 const PracticeDemo = () => {
     const [step, setStep] = useState<'idle' | 'recording' | 'result'>('idle');
 
-    const demoSentence = "She sells seashells by the seashore.";
-    const demoTranscript = "She sells sea shells by the sea shore.";
+    const demoSentence = "Curiosity is the engine of progress.";
+    const demoTranscript = "Curiosity is the EN-gine of progress.";
 
     const handleDemo = () => {
         setStep('recording');
@@ -36,12 +36,12 @@ const PracticeDemo = () => {
                         <p className="text-xl sm:text-2xl font-dm-sans text-[#111] leading-relaxed tracking-tight">
                             {step === 'result' ? (
                                 <>
-                                    <span className="text-emerald-600">She </span>
-                                    <span className="text-emerald-600">sells </span>
-                                    <span className="text-rose-500 bg-rose-50 px-1 rounded border-b-2 border-rose-300">sea shells </span>
-                                    <span className="text-emerald-600">by </span>
+                                    <span className="text-emerald-600">Curiosity </span>
+                                    <span className="text-emerald-600">is </span>
                                     <span className="text-emerald-600">the </span>
-                                    <span className="text-rose-500 bg-rose-50 px-1 rounded border-b-2 border-rose-300">sea shore</span>
+                                    <span className="text-rose-500 bg-rose-50 px-1 rounded border-b-2 border-rose-300">EN-gine </span>
+                                    <span className="text-emerald-600">of </span>
+                                    <span className="text-emerald-600">progress</span>
                                     <span className="text-emerald-600">.</span>
                                 </>
                             ) : (
@@ -110,8 +110,8 @@ const PracticeDemo = () => {
                                     <Icon icon="solar:lightbulb-linear" width="16" /> AI Coaching Tips
                                 </h4>
                                 <ul className="text-sm text-amber-900 leading-relaxed font-sans space-y-1.5 list-disc pl-4">
-                                    <li>"Seashells" should be one word — practice the /ʃ/ transition</li>
-                                    <li>"Seashore" is one word — blend the syllables smoothly</li>
+                                    <li>"Engine" emphasizes the first syllable: <span className="font-bold">EN</span>-gine</li>
+                                    <li>Try to stress the beginning of the word rather than dragging the ending.</li>
                                 </ul>
                             </div>
                         </div>

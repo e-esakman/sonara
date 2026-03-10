@@ -29,9 +29,10 @@ const ReadingViewer = () => {
     const [apiError, setApiError] = useState<string | null>(null);
     const [pronunciationScore, setPronunciationScore] = useState<number | null>(null);
     const [fluencyScore, setFluencyScore] = useState<number | null>(null);
-    const [confidenceScore, setConfidenceScore] = useState<number | null>(null);
     const [sessionSaved, setSessionSaved] = useState(false);
     const [showScores, setShowScores] = useState(false);
+    const [currentReadingWordIdx, setCurrentReadingWordIdx] = useState<number>(-1);
+    const [wordsPerMinute, setWordsPerMinute] = useState<number | null>(null);
     const recordingStartRef = useRef<number>(0);
 
     // Update spoken transcript in real-time
@@ -49,7 +50,7 @@ const ReadingViewer = () => {
                 setSessionSaved(false);
                 setShowScores(false);
                 try {
-                    const result = await analyzePronunciation(passage.content, transcript);
+                    const result = await analyzePronunciation(passage.content, transcript, accentStyle);
                     setAnalysis(result);
 
                     const pScore = result.accuracyScore;
@@ -60,13 +61,13 @@ const ReadingViewer = () => {
                     const durationMs = Date.now() - recordingStartRef.current;
                     const durationMin = durationMs / 60000;
                     const wpm = Math.round(spokenWords / Math.max(durationMin, 0.1));
+                    setWordsPerMinute(wpm);
 
                     const speechConsistency = Math.max(0, 100 - Math.abs(wpm - 130));
                     const cScore = Math.round(pScore * 0.5 + fScore * 0.3 + speechConsistency * 0.2);
 
                     setPronunciationScore(pScore);
                     setFluencyScore(fScore);
-                    setConfidenceScore(Math.min(100, cScore));
 
                     // Animate scores in
                     setTimeout(() => setShowScores(true), 100);
@@ -99,6 +100,8 @@ const ReadingViewer = () => {
     }, [transcript, isRecording, passage, addSession, audioUrl]);
 
     const handleStartRecording = () => {
+        setCurrentReadingWordIdx(-1);
+        stopSpeaking();
         recordingStartRef.current = Date.now();
         startRecording();
     };
@@ -113,11 +116,31 @@ const ReadingViewer = () => {
     const playCorrect = () => {
         if (!passage) return;
         stopSpeaking(); // Stop any previous playback
+        setCurrentReadingWordIdx(0);
+
+        const words = passage.content.split(/\s+/);
+        let charOffsets = [0];
+        for (let i = 0; i < words.length; i++) {
+            charOffsets.push(charOffsets[charOffsets.length - 1] + words[i].length + 1);
+        }
+
         speakText({
             text: passage.content,
             accentStyle: accentStyle,
             rate: autismMode ? 0.7 : 0.9,
+            onBoundary: (charIndex: number) => {
+                const nextIdx = charOffsets.findIndex(off => off > charIndex);
+                const wIdx = nextIdx === -1 ? Math.max(0, charOffsets.length - 2) : Math.max(0, nextIdx - 1);
+                setCurrentReadingWordIdx(wIdx);
+            },
+            onEnd: () => setCurrentReadingWordIdx(-1)
         });
+    };
+
+    const renderPhoneticWithStress = (phonetic: string) => {
+        return phonetic.split(/([A-Z]+)/).map((part, i) =>
+            /[A-Z]/.test(part) ? <span key={i} className="font-bold tracking-wider">{part}</span> : <span key={i}>{part}</span>
+        );
     };
 
     // Word-level comparison — inline-block for proper wrapping
@@ -136,16 +159,30 @@ const ReadingViewer = () => {
 
             const clean = word.toLowerCase().replace(/[.,!?;:'"]/g, '');
             const isIncorrect = analysis.incorrectWords.map(w => w.toLowerCase()).includes(clean);
+            const isUnclear = analysis.unclearWords?.map(w => w.toLowerCase()).includes(clean);
+            const isUnread = analysis.unreadWords?.map(w => w.toLowerCase()).includes(clean);
+
+            let className = 'inline transition-colors duration-300 ';
+            if (isIncorrect) {
+                className += 'text-rose-600 bg-rose-50 px-0.5 rounded border-b-2 border-rose-300 font-medium';
+            } else if (isUnclear) {
+                className += 'text-amber-600 bg-amber-50 px-0.5 rounded border-b-2 border-amber-300 font-medium';
+            } else if (isUnread) {
+                className += 'text-neutral-400 opacity-60';
+            } else {
+                className += 'text-emerald-700';
+            }
+
+            if (idx === currentReadingWordIdx) {
+                className += ' ring-2 ring-indigo-400 bg-indigo-50 px-1 rounded';
+            }
 
             return (
                 <span
                     key={idx}
-                    className={`inline transition-colors duration-300 ${isIncorrect
-                        ? 'text-rose-600 bg-rose-50 px-0.5 rounded border-b-2 border-rose-300 font-medium'
-                        : 'text-emerald-700'
-                        }`}
+                    className={className}
                     style={{ marginRight: '0.3em', whiteSpace: 'nowrap' }}
-                    title={isIncorrect ? `Mispronounced — try again` : 'Correct'}
+                    title={isIncorrect ? `Mispronounced — try again` : isUnclear ? `Missed or unclear` : 'Correct'}
                 >
                     {word}
                 </span>
@@ -328,7 +365,10 @@ const ReadingViewer = () => {
                                     <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center">
                                         <Icon icon="solar:chat-round-dots-bold" width="16" className="text-white" />
                                     </div>
-                                    <span className="text-sm font-semibold text-[#111] font-sans">AI Coach Feedback</span>
+                                    <div className="flex flex-col">
+                                        <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
+                                        <span className="text-xs text-neutral-500 font-sans">AI Coach Feedback</span>
+                                    </div>
                                 </div>
 
                                 {/* Scores — animated */}
@@ -342,8 +382,8 @@ const ReadingViewer = () => {
                                         <p className="text-xs text-emerald-500 mt-1 font-sans">Fluency</p>
                                     </div>
                                     <div className="bg-amber-50 rounded-2xl p-4 text-center">
-                                        <span className={`text-2xl font-dm-sans font-medium text-amber-600 ${showScores ? 'score-animate' : ''}`}>{confidenceScore}</span>
-                                        <p className="text-xs text-amber-500 mt-1 font-sans">Confidence</p>
+                                        <span className={`text-2xl font-dm-sans font-medium text-amber-600 ${showScores ? 'score-animate' : ''}`}>{wordsPerMinute || 0}</span>
+                                        <p className="text-xs text-amber-500 mt-1 font-sans">WPM</p>
                                     </div>
                                 </div>
 
@@ -370,7 +410,7 @@ const ReadingViewer = () => {
                                                 <span key={i} className="text-sm tracking-tight text-rose-500 font-medium font-sans bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100">
                                                     {word}
                                                     {analysis.phoneticBreakdown?.[word] && (
-                                                        <span className="text-xs font-sans text-rose-400 ml-1.5">({analysis.phoneticBreakdown[word]})</span>
+                                                        <span className="text-xs font-sans text-rose-400 ml-1.5">({renderPhoneticWithStress(analysis.phoneticBreakdown[word])})</span>
                                                     )}
                                                 </span>
                                             ))}
@@ -423,6 +463,38 @@ const ReadingViewer = () => {
                                         <p className="text-sm text-neutral-500 font-sans max-w-[250px]">
                                             {autismMode ? 'Your reading was wonderful. Be proud of yourself!' : 'Your reading sounds natural and clear.'}
                                         </p>
+                                    </div>
+                                )}
+
+                                {/* Replay & Compare */}
+                                {analysis && analysis.accuracyScore > 0 && audioUrl && (
+                                    <div className="bg-neutral-50 rounded-2xl p-4 sm:p-5 border border-neutral-100/50 mt-2">
+                                        <h4 className="text-neutral-700 text-xs font-medium uppercase tracking-tight flex items-center gap-1.5 font-sans mb-3 text-center justify-center">
+                                            <Icon icon="solar:headphones-round-sound-linear" width="16" /> Compare Pronunciation
+                                        </h4>
+                                        <div className="flex justify-center gap-4">
+                                            <button
+                                                onClick={playRecording}
+                                                className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+                                            >
+                                                <Icon icon="solar:play-circle-linear" width="18" /> Replay Yours
+                                            </button>
+                                            <div className="flex-1 flex gap-2">
+                                                <button
+                                                    onClick={playCorrect}
+                                                    className="flex-[3] flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
+                                                >
+                                                    <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
+                                                </button>
+                                                <button
+                                                    onClick={stopSpeaking}
+                                                    className="flex-1 flex items-center justify-center bg-white border border-neutral-200 py-2.5 rounded-xl text-neutral-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm"
+                                                    title="Stop Audio"
+                                                >
+                                                    <Icon icon="solar:stop-circle-linear" width="18" />
+                                                </button>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </div>

@@ -116,6 +116,9 @@ const BookCard = ({ passage }: Props) => {
                     <span className="flex items-center gap-1.5"><Icon icon="solar:clock-circle-linear" width="16" /> {passage.readingTime}</span>
                     <span className="flex items-center gap-1.5"><Icon icon="solar:document-text-linear" width="16" /> {passage.wordCount}w</span>
                 </div>
+                <div className="mt-2 flex items-center gap-1.5 text-sm font-semibold text-gray-900 group-hover:text-indigo-600 transition-colors">
+                    Practice Reading <Icon icon="solar:arrow-right-linear" className="group-hover:translate-x-1 transition-transform" />
+                </div>
             </div>
         </Link>
     );
