@@ -3,6 +3,7 @@ import { Icon } from '@iconify/react';
 import passages, { categories } from '../data/passages';
 import type { Passage } from '../data/passages';
 import BookCard from '../components/BookCard';
+import BookShelf from '../components/BookShelf';
 
 const Library = () => {
     const [activeCategory, setActiveCategory] = useState<string>('All');
@@ -72,11 +73,13 @@ const Library = () => {
 
                 {/* Bookshelf Grid */}
                 {filtered.length > 0 ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-8 gap-y-12 px-6 md:px-12">
+                    <BookShelf>
                         {filtered.map((passage: Passage) => (
-                            <BookCard key={passage.id} passage={passage} />
+                            <div key={passage.id} className="w-[280px] shrink-0 snap-start">
+                                <BookCard passage={passage} />
+                            </div>
                         ))}
-                    </div>
+                    </BookShelf>
                 ) : (
                     <div className="text-center py-20 px-6 md:px-12">
                         <Icon icon="lucide:book-x" className="w-16 h-16 text-gray-300 mx-auto mb-4" />

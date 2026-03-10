@@ -77,6 +77,7 @@ const Navigation = () => {
                                 onChange={(e) => setAccentStyle(e.target.value as 'American' | 'British' | 'Indian')}
                                 className="appearance-none bg-neutral-100 hover:bg-neutral-200 text-neutral-600 text-xs font-sans px-3 py-1.5 pr-7 rounded-full outline-none cursor-pointer transition-colors"
                                 title="AI Coach Accent Style"
+                                aria-label="AI Coach accent style"
                             >
                                 <option value="American">🇺🇸 US English</option>
                                 <option value="British">🇬🇧 UK English</option>
@@ -153,6 +154,7 @@ const Navigation = () => {
                                         value={accentStyle}
                                         onChange={(e) => setAccentStyle(e.target.value as 'American' | 'British' | 'Indian')}
                                         className="bg-neutral-50 border border-neutral-200 text-neutral-700 text-sm font-sans px-3 py-2 rounded-lg outline-none flex-1"
+                                        aria-label="AI Coach accent style"
                                     >
                                         <option value="American">American English Coach</option>
                                         <option value="British">British English Coach</option>
