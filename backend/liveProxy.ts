@@ -20,9 +20,10 @@ export function setupLiveProxy(server: Server) {
     const wss = new WebSocketServer({ server, path: '/live-ws' });
 
     wss.on('connection', async (clientWs: WebSocket) => {
+        // Prefer GEMINI_LIVEVOICE_KEY for live voice, fallback to GEMINI_API_KEY for backwards compatibility.
         const apiKey = process.env.GEMINI_LIVEVOICE_KEY || process.env.GEMINI_API_KEY;
         if (!apiKey) {
-            clientWs.close(1011, 'Server misconfigured: missing API key');
+            clientWs.close(1011, 'Server misconfigured: missing GEMINI_LIVEVOICE_KEY or GEMINI_API_KEY');
             return;
         }
 
