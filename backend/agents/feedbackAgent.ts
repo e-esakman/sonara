@@ -1,10 +1,36 @@
 import { GoogleGenAI } from '@google/genai';
 import { callGeminiWithRetry } from './geminiRetry.ts';
 
-const apiKey = process.env.GEMINI_API_KEY;
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+let _aiFeedbackInstance: GoogleGenAI | null = null;
+let _aiPracticeInstance: GoogleGenAI | null = null;
+
+function getAi(isLibraryPractice: boolean) {
+    if (isLibraryPractice && process.env.GEMINI_API_KEY) {
+        if (!_aiPracticeInstance) _aiPracticeInstance = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+        return _aiPracticeInstance;
+    } else if (!isLibraryPractice && process.env.GEMINI_FEEDBACK_KEY) {
+        if (!_aiFeedbackInstance) _aiFeedbackInstance = new GoogleGenAI({ apiKey: process.env.GEMINI_FEEDBACK_KEY });
+        return _aiFeedbackInstance;
+    }
+    const fallbackKey = process.env.GEMINI_FEEDBACK_KEY || process.env.GEMINI_API_KEY;
+    if (fallbackKey) return new GoogleGenAI({ apiKey: fallbackKey });
+    return null;
+}
 
 export interface FeedbackResult {
+    match?: boolean;
+    accuracy_score?: number;
+    fluency?: number;
+    wpm?: number;
+    word_analysis?: { word: string; spoken: string; status: string; tip?: string }[];
+    problem_words?: { word: string; issue: string; tip: string }[];
+    missing_words?: string[];
+    extra_words?: string[];
+    coaching_tips?: string[];
+    coach_message?: string[];
+    accent_detection?: string;
+
+    // standard properties
     suggestions: string[];
     tips: string[];
     phoneticBreakdown: { [word: string]: string };
@@ -18,8 +44,10 @@ export async function generateFeedback(
     unclearWords: string[],
     accent?: string
 ): Promise<FeedbackResult> {
+    const isLibraryPractice = expectedText.trim().length > 0;
+    const ai = getAi(isLibraryPractice);
     if (!ai) {
-        console.warn('GEMINI_API_KEY not set. Returning mock feedback.');
+        console.warn('GEMINI API KEYS not set. Returning mock feedback.');
         return {
             suggestions: [],
             tips: ['Error: Gemini API not configured.'],
@@ -36,28 +64,56 @@ Highlight syllable stress by using UPPERCASE letters for the stressed syllable i
     }
 
     const prompt = `
-You are an expert pronunciation coach.
-Analyze the user's pronunciation given the expected text and what was actually transcribed.
-The upstream Pronunciation Agent has identified the following potential mispronounced words: ${incorrectWords.join(', ') || 'None'}
-The upstream Pronunciation Agent has identified the following skipped/unclear words: ${unclearWords.join(', ') || 'None'}
+You are Nova, the AI pronunciation coach inside the Sonara speaking practice app.
 
-Target text: "${expectedText}"
-User transcript: "${transcript}"
+Your task is to analyze a user's spoken sentence and give detailed pronunciation feedback.
+
+User spoken transcript: "${transcript}"
+Expected phrase (if applicable): "${expectedText || ''}"
+
 ${accentPrompt}
 
-CRITICAL INSTRUCTION: The user may have only read a portion of the text and stopped early.
-DO NOT list words as "incorrect" if the user simply hasn't spoken them yet. 
-ONLY evaluate the words the user actually attempted in the transcript.
+Instructions:
+1. Focus on pronunciation clarity, vowel sounds, consonants, and syllable stress.
+2. Identify the most important mispronounced words.
+3. Highlight those words and explain the issue clearly.
+4. Provide short coaching suggestions for improvement.
+5. Keep the tone encouraging and supportive.
 
-Return actionable learning advice strictly as a JSON object with this shape:
+Return actionable learning advice strictly as a JSON object with this ALWAYS structure:
 {
-  "phoneticBreakdown": { "word": "/phonetic/" },
-  "tips": string[],
-  "suggestions": string[] (optional, accent-specific suggestions),
-  "accentInfluence": string (optional, e.g. "Indian English")
+${isLibraryPractice ? `
+  "match": true,
+  "accuracy_score": 95,
+  "fluency": 90,
+  "wpm": 120,
+  "word_analysis": [ { "word": "expected", "spoken": "spoken", "status": "incorrect", "tip": "Focus on..." } ],
+  "missing_words": [],
+  "extra_words": [],
+  "coaching_tips": ["Focus on distinguishing..."],
+  "coach_message": "...",
+` : `
+  "accuracy_score": 95,
+  "fluency": 90,
+  "wpm": 120,
+  "problem_words": [ { "word": "spoken", "issue": "...", "tip": "..." } ],
+  "coaching_tips": [ "..." ],
+  "coach_message": "...",
+`}
+  "accent_detection": "...",
+  "phoneticBreakdown": { "WordToImprove": "Word-To-Im-PROVE" },
+  "tips": [
+    "**Analyzing Speech Clarity**\\n\\nYour phrase was understandable, but a few sounds could be clearer.\\n\\n**Refining Pronunciation**\\n\\n• \\"books\\" sounded like \\"box\\". Try rounding your lips slightly.\\n• In \\"celebrations\\", the syllable stress should fall on **\\"bra\\"**.\\n\\nCoaching tip: Slow down slightly and emphasize vowel clarity."
+  ],
+  "suggestions": []
 }
 
-No markdown, just the JSON string, and no extra text.
+Rules:
+- Give a Phonetic Breakdown for any mispronounced or unclear word.
+- The upstream System has identified potential mispronounced words: ${incorrectWords.join(', ') || 'None'}
+- The upstream System has identified skipped/unclear words: ${unclearWords.join(', ') || 'None'}
+- CRITICAL INSTRUCTION: The user may have only read a portion of the text and stopped early. DO NOT list words as "skipped/missing" if the user simply hasn't spoken them yet. ONLY evaluate the portion of the text the user actually attempted.
+- Do NOT use markdown code blocks, return ONLY valid JSON.
 `;
 
     try {
@@ -72,8 +128,6 @@ No markdown, just the JSON string, and no extra text.
         );
 
         const text = response.text || "{}";
-
-        // Strip markdown code blocks if the model ignored responseMimeType
         let jsonStr = text;
         const start = jsonStr.indexOf('{');
         const end = jsonStr.lastIndexOf('}');
@@ -81,7 +135,14 @@ No markdown, just the JSON string, and no extra text.
             jsonStr = jsonStr.substring(start, end + 1);
         }
 
-        return JSON.parse(jsonStr) as FeedbackResult;
+        const parsed = JSON.parse(jsonStr);
+        return {
+            ...parsed,
+            accentInfluence: parsed.accent_detection || 'Unknown',
+            suggestions: parsed.coaching_tips || parsed.suggestions || [],
+            tips: parsed.tips || parsed.coach_message ? [parsed.coach_message].filter(Boolean) : [],
+            phoneticBreakdown: parsed.phoneticBreakdown || {}
+        } as FeedbackResult;
     } catch (error: unknown) {
         const message = error instanceof Error ? error.message : String(error);
         console.error("Gemini API error in Feedback Agent:", error);
