@@ -12,6 +12,7 @@ const Navigation = () => {
     const navLinks = [
         { to: '/', label: 'Home' },
         { to: '/practice', label: 'Practice' },
+        { to: '/grammar', label: 'Grammar' },
         { to: '/library', label: 'Library' },
         { to: '/progress', label: 'Progress' },
         { to: '/analytics', label: 'Analytics' },

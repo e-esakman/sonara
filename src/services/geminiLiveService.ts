@@ -15,6 +15,7 @@ class GeminiLiveService {
     // Callbacks
     public onTextResponse: (text: string) => void = () => { };
     public onAudioResponse: (audioData: string) => void = () => { };
+    public onTurnComplete: () => void = () => { };
     public onError: (error: Error) => void = () => { };
     public onStatus: (status: string) => void = () => { };
 
@@ -83,6 +84,7 @@ class GeminiLiveService {
 
             if (content?.turnComplete) {
                 console.log('[GeminiLive] Model turn complete');
+                this.onTurnComplete();
             }
         } catch (e) {
             console.error("[GeminiLive] Failed to process message", e);
