@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Icon } from '@iconify/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
 import { analyzePronunciation } from '../services/pronunciationService';
 import type { AnalysisResult } from '../services/pronunciationService';
@@ -7,7 +8,13 @@ import { geminiLiveService } from '../services/geminiLiveService';
 import { useStore } from '../store/useStore';
 import { speakText, stopSpeaking } from '../utils/tts';
 
-const FreeSpeakMode = () => {
+interface FreeSpeakModeProps {
+    initialMode?: 'standard' | 'live';
+    hideToggle?: boolean;
+    titleMode?: 'free-speak' | 'speech-analysis' | 'live-coach';
+}
+
+const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode = 'free-speak' }: FreeSpeakModeProps) => {
     const { addSession, autismMode, accentStyle } = useStore();
 
     const {
@@ -21,7 +28,7 @@ const FreeSpeakMode = () => {
         stopRecording,
     } = useSpeechRecognition();
 
-    const [coachMode, setCoachMode] = useState<'standard' | 'live'>('standard');
+    const [coachMode, setCoachMode] = useState<'standard' | 'live'>(initialMode);
     const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [apiError, setApiError] = useState<string | null>(null);
@@ -33,7 +40,6 @@ const FreeSpeakMode = () => {
     // Live AI Coach state
     const [liveStatus, setLiveStatus] = useState<string>('Disconnected');
     const [liveRecording, setLiveRecording] = useState(false);
-    const [liveTranscript, setLiveTranscript] = useState('');
     const [liveUserTranscript, setLiveUserTranscript] = useState('');
     const audioContextRef = useRef<AudioContext | null>(null);
     const micContextRef = useRef<AudioContext | null>(null);
@@ -50,11 +56,29 @@ const FreeSpeakMode = () => {
     }, []);
 
     // Gemini Live callbacks
+    const currentCoachTurnIdRef = useRef<string | null>(null);
+
     useEffect(() => {
         geminiLiveService.onStatus = setLiveStatus;
-        geminiLiveService.onTextResponse = (t) => setLiveTranscript(prev => prev + ' ' + t);
+        
+        geminiLiveService.onTextResponse = (t) => {
+            setLiveMessages(prev => {
+                const last = prev[prev.length - 1];
+                if (currentCoachTurnIdRef.current && last && last.id === currentCoachTurnIdRef.current) {
+                    const updated = [...prev];
+                    updated[updated.length - 1] = { ...last, text: last.text + ' ' + t };
+                    return updated;
+                } else {
+                    const newId = crypto.randomUUID();
+                    currentCoachTurnIdRef.current = newId;
+                    return [...prev, { id: newId, role: 'coach', text: t }];
+                }
+            });
+        };
 
-        // Add hook for turn completion if exposed, or we can just append liveTranscript here... wait, geminiLiveService has no onTurnComplete currently. Let's just track liveTranscript.
+        geminiLiveService.onTurnComplete = () => {
+            currentCoachTurnIdRef.current = null;
+        };
 
         geminiLiveService.onAudioResponse = (base64Audio) => {
             try {
@@ -110,6 +134,15 @@ const FreeSpeakMode = () => {
             if (coachMode === 'standard') setLiveUserTranscript(combined);
         }
     }, [transcript, interimTranscript, coachMode]);
+
+    // Live AI Coach Analysis logic
+    const [liveMessages, setLiveMessages] = useState<Array<{ id: string, role: 'user'|'coach', text: string, analysis?: AnalysisResult }>>([{
+        id: 'welcome_msg',
+        role: 'coach',
+        text: "Hi there! I'm Nova, your AI pronunciation coach. Tap the microphone and say something, and we can start practicing together!"
+    }]);
+    const [isLiveAnalyzing, setIsLiveAnalyzing] = useState(false);
+    const liveSpeechRef = useRef<any>(null);
 
     // Standard analysis on stop
     useEffect(() => {
@@ -180,7 +213,6 @@ const FreeSpeakMode = () => {
     // Mode switch
     const handleModeSwitch = async (newMode: 'standard' | 'live') => {
         setCoachMode(newMode);
-        setLiveTranscript('');
         setLiveUserTranscript('');
         setAnalysis(null);
         setWordsPerMinute(null);
@@ -193,9 +225,14 @@ const FreeSpeakMode = () => {
         }
     };
 
+    useEffect(() => {
+        if (initialMode && initialMode !== coachMode) {
+            handleModeSwitch(initialMode);
+        }
+    }, [initialMode]);
+
     const startLiveRecording = useCallback(async () => {
         stopAudioPlayback();
-        setLiveTranscript('');
 
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
@@ -231,11 +268,43 @@ const FreeSpeakMode = () => {
 
             liveRecorderRef.current = processor;
             setLiveRecording(true);
+            
+            // --- Live Speech Recognition for UI Text ---
+            const SpeechRecognitionAPI = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+            if (SpeechRecognitionAPI) {
+                const recognition = new SpeechRecognitionAPI();
+                recognition.continuous = true;
+                recognition.interimResults = false;
+                recognition.lang = 'en-US';
+                
+                recognition.onresult = (event: any) => {
+                    let finalChunk = '';
+                    for (let i = event.resultIndex; i < event.results.length; ++i) {
+                        if (event.results[i].isFinal) finalChunk += event.results[i][0].transcript;
+                    }
+                    if (finalChunk.trim()) {
+                        const chunkText = finalChunk.trim();
+                        const msgId = crypto.randomUUID();
+                        // Add message
+                        setLiveMessages(prev => [...prev, { id: msgId, role: 'user', text: chunkText }]);
+                        
+                        setIsLiveAnalyzing(true);
+                        analyzePronunciation(chunkText, chunkText, accentStyle)
+                            .then(result => setLiveMessages(prev => prev.map(m => m.id === msgId ? { ...m, analysis: result } : m)))
+                            .catch(e => console.error(e))
+                            .finally(() => setIsLiveAnalyzing(false));
+                    }
+                };
+                recognition.onerror = (e: any) => console.log('Live speech err:', e.error);
+                recognition.start();
+                liveSpeechRef.current = recognition;
+            }
+
         } catch (e) {
             console.error('[FreeSpeakMode] Mic error:', e);
             setLiveRecording(false);
         }
-    }, [stopAudioPlayback]);
+    }, [stopAudioPlayback, accentStyle]);
 
     const stopLiveRecording = useCallback(() => {
         if (!liveRecording && !liveRecorderRef.current) return;
@@ -248,6 +317,10 @@ const FreeSpeakMode = () => {
         if (liveStreamRef.current) {
             liveStreamRef.current.getTracks().forEach(t => t.stop());
             liveStreamRef.current = null;
+        }
+        if (liveSpeechRef.current) {
+            liveSpeechRef.current.stop();
+            liveSpeechRef.current = null;
         }
     }, [liveRecording]);
 
@@ -272,7 +345,7 @@ const FreeSpeakMode = () => {
         let paceColor = 'bg-emerald-500';
         let paceBg = 'bg-emerald-50';
         let paceText = 'text-emerald-700';
-        let percent = Math.min((wordsPerMinute / 250) * 100, 100);
+        const percent = Math.min((wordsPerMinute / 250) * 100, 100);
 
         if (wordsPerMinute < 100) {
             paceColor = 'bg-blue-500';
@@ -309,81 +382,135 @@ const FreeSpeakMode = () => {
     };
 
     return (
-        <div className="flex flex-col lg:grid lg:grid-cols-12 gap-6 lg:gap-8 items-start">
+        <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8 lg:gap-10 items-start">
             {/* Left: Speaking area */}
-            <div className="w-full lg:col-span-7">
-                <div className="bg-white rounded-3xl p-6 sm:p-8 md:p-10 shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-neutral-100 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-violet-50 rounded-full blur-3xl opacity-40 -translate-y-1/2 translate-x-1/2 pointer-events-none" />
+            <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, ease: 'easeOut' }}
+                className="w-full lg:col-span-7"
+            >
+                <div className="bg-white rounded-[32px] p-8 sm:p-10 md:p-12 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-80 h-80 bg-violet-50/80 rounded-full blur-3xl opacity-60 -translate-y-1/2 translate-x-1/2 pointer-events-none" />
 
                     {/* Mode toggle */}
-                    <div className="relative z-10 flex bg-neutral-100 rounded-full p-1 mx-auto mb-8 w-fit border border-neutral-200 shadow-sm">
-                        <button
-                            onClick={() => handleModeSwitch('standard')}
-                            className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 ${coachMode === 'standard' ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-indigo-600' : 'text-neutral-500 hover:text-[#111]'}`}
-                        >Standard Analysis</button>
-                        <button
-                            onClick={() => handleModeSwitch('live')}
-                            className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${coachMode === 'live' ? 'bg-indigo-50 text-indigo-700 shadow-[0_2px_8px_rgba(99,102,241,0.2)] border border-indigo-100' : 'text-neutral-500 hover:text-[#111]'}`}
-                        >
-                            <Icon icon="solar:microphone-3-bold-duotone" className={coachMode === 'live' ? 'animate-pulse text-indigo-500' : ''} />
-                            Live AI Coach
-                        </button>
-                    </div>
+                    {!hideToggle && (
+                        <div className="relative z-10 flex bg-neutral-100 rounded-full p-1 mx-auto mb-8 w-fit border border-neutral-200 shadow-sm">
+                            <button
+                                onClick={() => handleModeSwitch('standard')}
+                                className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 ${coachMode === 'standard' ? 'bg-white shadow-[0_2px_8px_rgba(0,0,0,0.08)] text-indigo-600' : 'text-neutral-500 hover:text-[#111]'}`}
+                            >Standard Analysis</button>
+                            <button
+                                onClick={() => handleModeSwitch('live')}
+                                className={`px-5 py-2.5 rounded-full text-sm font-semibold transition-all duration-300 flex items-center gap-2 ${coachMode === 'live' ? 'bg-indigo-50 text-indigo-700 shadow-[0_2px_8px_rgba(99,102,241,0.2)] border border-indigo-100' : 'text-neutral-500 hover:text-[#111]'}`}
+                            >
+                                <Icon icon="solar:microphone-3-bold-duotone" className={coachMode === 'live' ? 'animate-pulse text-indigo-500' : ''} />
+                                Live AI Coach
+                            </button>
+                        </div>
+                    )}
 
                     {/* Prompt text */}
-                    <div className="relative z-10 text-center mb-8">
-                        <h2 className="text-2xl md:text-3xl font-dm-sans text-[#111] tracking-tight mb-2">
-                            {coachMode === 'live' ? 'Talk to Your AI Coach' : 'Speak Freely'}
+                    <div className="relative z-10 text-center mb-10">
+                        <h2 className="text-[28px] md:text-[32px] font-dm-sans font-semibold text-[#111] tracking-tight mb-3">
+                            {titleMode === 'live-coach' ? 'Talk to Your AI Coach' : titleMode === 'speech-analysis' ? 'Speech Analysis' : 'Speak Freely'}
                         </h2>
-                        <p className="text-neutral-500 font-sans text-sm max-w-lg mx-auto">
-                            {coachMode === 'live'
+                        <p className="text-neutral-500 font-sans text-[15px] md:text-base max-w-lg mx-auto leading-relaxed">
+                            {titleMode === 'live-coach'
                                 ? 'Tap the mic to start a conversational practice session with your AI speaking coach.'
                                 : autismMode
                                     ? 'Press and hold the microphone. Say anything you like. I will give you friendly feedback.'
-                                    : 'Hold the microphone and say anything. AI will analyze your pronunciation, fluency, and pace.'}
+                                    : titleMode === 'speech-analysis'
+                                        ? 'Record a phrase and receive detailed pronunciation feedback.'
+                                        : 'Hold the microphone and say anything. AI will analyze your pronunciation, fluency, and pace.'}
                         </p>
                     </div>
 
                     {/* Live transcript sections */}
-                    {(spokenText || liveUserTranscript) && (
-                        <div className="relative z-10 mb-6 space-y-3">
-                            {/* You said */}
-                            <div className="bg-neutral-50 rounded-2xl p-4 sm:p-5 border border-neutral-100">
-                                <h4 className="text-xs text-neutral-400 uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5">
-                                    <Icon icon="solar:user-speak-linear" width="14" />
-                                    You said:
-                                </h4>
-                                <p className="text-base font-sans text-[#111] leading-relaxed" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
-                                    "{coachMode === 'live' ? (liveUserTranscript || spokenText) : spokenText}"
-                                </p>
+                    {coachMode === 'live' ? (
+                        <div className="relative z-10 mb-6 flex flex-col gap-6 w-full">
+                            <div className="flex-1 overflow-y-auto p-2 sm:p-4 flex flex-col gap-6 max-h-[400px]">
+                                {liveMessages.map((msg) => {
+                                    if (msg.role === 'coach') {
+                                        return (
+                                            <div key={msg.id} className="flex gap-3 sm:gap-4 max-w-[90%] sm:max-w-[85%]">
+                                                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center mt-1 flex-shrink-0">
+                                                    <Icon icon="solar:stars-bold-duotone" width="16" className="text-indigo-600" />
+                                                </div>
+                                                <div className="bg-white border border-neutral-200 rounded-2xl rounded-tl-sm p-3 sm:p-4 shadow-sm">
+                                                    <p className="text-sm sm:text-base font-sans text-neutral-800 leading-relaxed" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
+                                                        {msg.text.trim()}
+                                                    </p>
+                                                    <span className="text-xs text-neutral-400 mt-2 block font-sans">
+                                                        Just now
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        );
+                                    } else {
+                                        return (
+                                            <div key={msg.id} className="flex gap-3 sm:gap-4 max-w-[90%] sm:max-w-[85%] self-end flex-row-reverse">
+                                                <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center mt-1 flex-shrink-0">
+                                                    <span className="text-indigo-700 font-bold text-xs font-sans uppercase">You</span>
+                                                </div>
+                                                <div className="bg-indigo-600 rounded-2xl rounded-tr-sm p-3 sm:p-4 shadow-sm text-left">
+                                                    {msg.analysis ? (
+                                                        <p className="text-sm sm:text-base font-sans leading-relaxed text-white" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
+                                                            {msg.text.split(/\s+/).map((word, i) => {
+                                                                const clean = word.toLowerCase().replace(/[.,!?;:'"]/g, '');
+                                                                const isIncorrect = msg.analysis!.incorrectWords.map(w=>w.toLowerCase()).includes(clean);
+                                                                const isUnclear = msg.analysis!.unclearWords?.map(w=>w.toLowerCase()).includes(clean);
+                                                                
+                                                                let colorClass = "text-white";
+                                                                if(isIncorrect) colorClass = "bg-rose-500 text-white px-1 rounded-sm border-b-2 border-rose-300 font-bold";
+                                                                else if(isUnclear) colorClass = "bg-amber-500 text-white px-1 rounded-sm border-b-2 border-amber-300 font-bold";
+                                                                return <span key={i} className={`${colorClass} mr-1 inline-block`}>{word}</span>;
+                                                            })}
+                                                        </p>
+                                                    ) : (
+                                                        <p className="text-sm sm:text-base font-sans text-white leading-relaxed" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
+                                                            {msg.text.trim()}
+                                                        </p>
+                                                    )}
+                                                    <div className="flex items-center justify-end gap-1 mt-2">
+                                                        <span className="text-xs text-indigo-200 font-sans">Just now</span>
+                                                        <Icon icon="solar:check-read-linear" className="w-4 h-4 text-indigo-200" />
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        );
+                                    }
+                                })}
                             </div>
-
-                            {/* AI Coach Response (Live mode) */}
-                            {coachMode === 'live' && liveTranscript && (
-                                <div className="bg-indigo-50/60 rounded-2xl p-4 sm:p-5 border border-indigo-100">
-                                    <h4 className="text-xs text-indigo-500 uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5">
-                                        <Icon icon="solar:chat-round-dots-linear" width="14" />
-                                        AI Coach Response:
+                        </div>
+                    ) : (
+                        (spokenText || liveUserTranscript) && (
+                            <div className="relative z-10 mb-6 space-y-3">
+                                {/* You said */}
+                                <div className="bg-neutral-50 rounded-2xl p-4 sm:p-5 border border-neutral-100">
+                                    <h4 className="text-xs text-neutral-400 uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5">
+                                        <Icon icon="solar:user-speak-linear" width="14" />
+                                        You said:
                                     </h4>
-                                    <p className="text-base font-sans text-indigo-900 leading-relaxed" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
-                                        "{liveTranscript.trim()}"
+                                    <p className="text-base font-sans text-[#111] leading-relaxed" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
+                                        "{spokenText}"
                                     </p>
                                 </div>
-                            )}
 
-                            {/* Suggested corrections (Standard mode) */}
-                            {coachMode === 'standard' && analysis?.suggestions && analysis.suggestions.length > 0 && (
-                                <div className="bg-emerald-50/50 rounded-2xl p-4 sm:p-5 border border-emerald-100">
-                                    <h4 className="text-xs text-emerald-600 uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5">
-                                        <Icon icon="solar:magic-stick-3-linear" width="14" />
-                                        Suggested Correction:
-                                    </h4>
-                                    <ul className="text-sm text-emerald-900 leading-relaxed font-sans space-y-1 list-disc pl-4">
-                                        {analysis.suggestions.map((s, i) => <li key={i}>{s}</li>)}
-                                    </ul>
-                                </div>
-                            )}
-                        </div>
+                                {/* Suggested corrections (Standard mode) */}
+                                {analysis?.suggestions && analysis.suggestions.length > 0 && (
+                                    <div className="bg-emerald-50/50 rounded-2xl p-4 sm:p-5 border border-emerald-100">
+                                        <h4 className="text-xs text-emerald-600 uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5">
+                                            <Icon icon="solar:magic-stick-3-linear" width="14" />
+                                            Suggested Correction:
+                                        </h4>
+                                        <ul className="text-sm text-emerald-900 leading-relaxed font-sans space-y-1 list-disc pl-4">
+                                            {analysis.suggestions.map((s, i) => <li key={i}>{s}</li>)}
+                                        </ul>
+                                    </div>
+                                )}
+                            </div>
+                        )
                     )}
 
                     {/* Pace meter */}
@@ -394,47 +521,57 @@ const FreeSpeakMode = () => {
                     )}
 
                     {/* Mic controls */}
-                    <div className="relative z-10 flex justify-center items-center gap-6">
+                    <div className="relative z-10 flex justify-center items-center gap-6 mt-8">
                         {coachMode === 'live' && (
                             <>
-                                <button
+                                <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
                                     onClick={stopAudioPlayback}
-                                    className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-all hover:scale-105"
+                                    className="w-14 h-14 flex items-center justify-center rounded-full bg-neutral-100/80 text-neutral-600 hover:bg-neutral-200 hover:text-[#111] transition-colors"
                                     title="Stop AI playback"
                                 >
-                                    <Icon icon="solar:stop-circle-linear" width="22" />
-                                </button>
-                                <button
+                                    <Icon icon="solar:stop-circle-linear" width="24" />
+                                </motion.button>
+                                <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
                                     onClick={toggleLiveRecording}
-                                    className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-all touch-none select-none ${liveRecording ? 'bg-rose-500 mic-recording scale-110' : 'bg-[#111] hover:scale-105'}`}
+                                    className={`w-20 h-20 sm:w-[88px] sm:h-[88px] flex items-center justify-center rounded-full text-white shadow-[0_8px_32px_rgba(99,102,241,0.25)] transition-colors hover:shadow-[0_12px_40px_rgba(99,102,241,0.35)] touch-none select-none relative ${liveRecording ? 'bg-rose-500' : 'bg-gradient-to-br from-indigo-500 to-indigo-700'}`}
                                     aria-label={liveRecording ? 'Stop speaking' : 'Start speaking'}
                                 >
-                                    <Icon icon={liveRecording ? 'solar:stop-bold' : 'solar:microphone-2-linear'} width="28" />
-                                </button>
+                                    {liveRecording && <div className="absolute inset-0 rounded-full animate-ping bg-rose-400 opacity-40"></div>}
+                                    <Icon icon={liveRecording ? 'solar:stop-bold' : 'solar:microphone-2-bold'} width="36" className="relative z-10" />
+                                </motion.button>
                             </>
                         )}
                         {coachMode === 'standard' && (
                             <>
-                                <button
+                                <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
                                     onClick={() => { stopSpeaking(); if (audioUrl) { const a = new Audio(audioUrl); a.play().catch(console.error); } }}
-                                    className="w-12 h-12 flex items-center justify-center rounded-full bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition-all hover:scale-105"
+                                    className="w-14 h-14 flex items-center justify-center rounded-full bg-neutral-100/80 text-neutral-600 hover:bg-neutral-200 hover:text-[#111] transition-colors disabled:opacity-50 disabled:pointer-events-none"
                                     title="Replay recording"
                                     disabled={!audioUrl}
                                 >
-                                    <Icon icon="solar:play-linear" width="22" />
-                                </button>
-                                <button
+                                    <Icon icon="solar:play-linear" width="24" />
+                                </motion.button>
+                                <motion.button
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
                                     onMouseDown={handleStandardStart}
                                     onMouseUp={stopRecording}
                                     onMouseLeave={isRecording ? stopRecording : undefined}
                                     onTouchStart={(e) => { e.preventDefault(); handleStandardStart(); }}
                                     onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
-                                    className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-all duration-200 touch-none select-none ${isRecording ? 'bg-rose-500 mic-recording scale-110' : 'bg-[#111] hover:scale-105 hover:shadow-xl'}`}
+                                    className={`w-20 h-20 sm:w-[88px] sm:h-[88px] flex items-center justify-center rounded-full text-white shadow-[0_8px_32px_rgba(99,102,241,0.25)] transition-colors hover:shadow-[0_12px_40px_rgba(99,102,241,0.35)] duration-200 touch-none select-none relative ${isRecording ? 'bg-rose-500' : 'bg-gradient-to-br from-indigo-500 to-indigo-700'}`}
                                     disabled={isAnalyzing || !isSupported}
                                     aria-label="Hold to speak"
                                 >
-                                    <Icon icon={isRecording ? 'solar:microphone-2-bold' : 'solar:microphone-2-linear'} width="28" />
-                                </button>
+                                    {isRecording && <div className="absolute inset-0 rounded-full animate-ping bg-rose-400 opacity-40"></div>}
+                                    <Icon icon={isRecording ? 'solar:microphone-2-bold' : 'solar:microphone-2-bold'} width="36" className="relative z-10" />
+                                </motion.button>
                             </>
                         )}
                     </div>
@@ -468,83 +605,146 @@ const FreeSpeakMode = () => {
                         )}
                     </div>
                 </div>
-            </div>
+            </motion.div>
 
             {/* Right: Analysis panel */}
-            <div className="w-full lg:col-span-5">
-                {coachMode === 'live' ? (
-                    <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-[0_20px_40px_rgb(0,0,0,0.06)] border border-neutral-100 flex flex-col gap-5 min-h-[300px]">
-                        <div className="flex items-center gap-2 pb-3 border-b border-neutral-100">
-                            <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center">
-                                <Icon icon="solar:chat-round-dots-bold" width="16" className="text-white" />
-                            </div>
-                            <div className="flex flex-col">
-                                <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
-                                <span className="text-xs text-neutral-500 font-sans">Live AI Coach</span>
-                            </div>
-                            <span className={`ml-auto text-xs font-sans px-2.5 py-1 rounded-full ${liveStatus === 'Connected' ? 'bg-emerald-50 text-emerald-600' : liveStatus.startsWith('Error') ? 'bg-rose-50 text-rose-600' : 'bg-neutral-100 text-neutral-500'}`}>
-                                {liveStatus}
-                            </span>
-                        </div>
-
-                        <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
-                            <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center">
-                                <Icon icon="solar:microphone-3-bold-duotone" width="32" className="text-indigo-400" />
-                            </div>
-                            <p className="text-neutral-500 font-sans text-sm max-w-[280px]">
-                                The Live AI Coach will respond with voice and text. Tap the mic to begin your conversation.
-                            </p>
-                        </div>
-
-                        {/* Conversation log */}
-                        {(spokenText || liveTranscript) && (
-                            <div className="space-y-3 border-t border-neutral-100 pt-4">
-                                {spokenText && (
-                                    <div>
-                                        <h4 className="text-xs text-neutral-400 uppercase font-bold mb-1 font-sans">You</h4>
-                                        <p className="text-sm text-[#111] font-sans bg-neutral-50 p-3 rounded-xl">{spokenText}</p>
-                                    </div>
-                                )}
-                                {liveTranscript && (
-                                    <div>
-                                        <h4 className="text-xs text-indigo-500 uppercase font-bold mb-1 font-sans">Coach</h4>
-                                        <p className="text-sm text-indigo-900 font-sans bg-indigo-50 p-3 rounded-xl">{liveTranscript.trim()}</p>
-                                    </div>
-                                )}
-
-
-                            </div>
-                        )}
+            <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, delay: 0.1, ease: 'easeOut' }}
+                className="w-full lg:col-span-5"
+            >
+        {coachMode === 'live' ? (
+            <div className="bg-white rounded-[32px] p-6 sm:p-8 md:p-10 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col gap-5 min-h-[300px]">
+                <div className="flex items-center gap-3 pb-4 border-b border-neutral-100/80">
+                    <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center shadow-md">
+                        <Icon icon="solar:chat-round-dots-bold" width="20" className="text-white" />
                     </div>
+                    <div className="flex flex-col">
+                        <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
+                    </div>
+                </div>
+
+                {liveStatus === 'Disconnected' ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
+                        <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center">
+                            <Icon icon="solar:microphone-3-bold-duotone" width="32" className="text-indigo-400" />
+                        </div>
+                        <p className="text-neutral-500 font-sans text-sm max-w-[280px]">
+                            Connected to Live AI Coach
+                        </p>
+                    </div>
+                ) : isLiveAnalyzing ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
+                        <Icon icon="line-md:loading-twotone-loop" width="48" className="text-indigo-500" />
+                        <h3 className="font-dm-sans text-lg text-[#111]">Analyzing Speech Clarity...</h3>
+                    </div>
+                ) : liveMessages.filter(m => m.role === 'user' && m.analysis).length > 0 ? (
+                    (() => {
+                        const lastUserAnalysis = liveMessages.filter(m => m.role === 'user' && m.analysis).pop()!.analysis!;
+                        const isPerfect = lastUserAnalysis.incorrectWords.length === 0;
+                        
+                        return (
+                        <div className="flex flex-col gap-6">
+                            <div>
+                                <h3 className="font-dm-sans text-lg text-[#111] mb-2">Analyzing Speech Clarity</h3>
+                                {isPerfect ? (
+                                    <p className="text-neutral-500 font-sans text-sm">
+                                        That sounded great! Your pronunciation was clear and natural.
+                                    </p>
+                                ) : (
+                                    <p className="text-neutral-500 font-sans text-sm">
+                                        I've analyzed your recent phrase and focused on clarity, rhythm, and pronunciation.
+                                    </p>
+                                )}
+                            </div>
+                            
+                            {!isPerfect && (
+                                <>
+                                    <div>
+                                        <h4 className="text-neutral-400 text-xs uppercase font-bold mb-2 font-sans">Observation</h4>
+                                        <p className="text-sm text-[#111] font-sans">
+                                            Your pronunciation is understandable, but a few consonants were softened.
+                                        </p>
+                                    </div>
+                                    
+                                    <div>
+                                        <h4 className="text-neutral-400 text-xs uppercase font-bold mb-2 font-sans">Focus Words</h4>
+                                        <div className="flex flex-wrap gap-2">
+                                            {lastUserAnalysis.incorrectWords.map((word, i) => (
+                                                <span key={i} className="text-sm text-rose-500 font-medium font-sans bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100">
+                                                    {word}
+                                                </span>
+                                            ))}
+                                            {lastUserAnalysis.unclearWords?.map((word, i) => (
+                                                <span key={i+100} className="text-sm text-amber-500 font-medium font-sans bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100">
+                                                    {word}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    
+                                    {lastUserAnalysis.tips?.length > 0 && (
+                                        <div>
+                                            <h4 className="text-neutral-400 text-xs uppercase font-bold mb-2 font-sans">Coaching Tips</h4>
+                                            <ul className="text-sm text-neutral-600 leading-relaxed font-sans space-y-1 pl-4 list-disc">
+                                                {lastUserAnalysis.tips.map((tip, i) => <li key={i}>{tip}</li>)}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )})()
                 ) : (
-                    <>
+                    <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
+                        <p className="text-neutral-500 font-sans text-sm max-w-[280px]">
+                            Connected to Live AI Coach
+                        </p>
+                    </div>
+                )}
+            </div>
+        ) : (
+                    <AnimatePresence mode="wait">
                         {!analysis && !isAnalyzing ? (
-                            <div className="bg-white rounded-3xl p-8 shadow-[0_20px_40px_rgb(0,0,0,0.06)] border border-neutral-100 flex flex-col items-center justify-center min-h-[300px] text-center gap-4">
-                                <div className="w-16 h-16 bg-violet-50 rounded-full flex items-center justify-center">
-                                    <Icon icon="solar:soundwave-circle-linear" width="32" className="text-violet-400" />
+                            <motion.div 
+                                key="idle" 
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
+                                className="bg-white rounded-[32px] p-8 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col items-center justify-center min-h-[400px] text-center gap-4"
+                            >
+                                <div className="w-20 h-20 bg-violet-50/80 rounded-full flex items-center justify-center">
+                                    <Icon icon="solar:soundwave-circle-linear" width="40" className="text-violet-500" />
                                 </div>
-                                <div>
-                                    <h3 className="font-dm-sans text-lg text-[#111] mb-1">Free Speaking Feedback</h3>
-                                    <p className="text-neutral-500 font-sans text-sm max-w-[250px]">
+                                <div className="mt-2">
+                                    <h3 className="font-dm-sans text-[22px] font-semibold text-[#111] mb-2">Free Speaking Feedback</h3>
+                                    <p className="text-neutral-500 font-sans text-[15px] max-w-[280px] leading-relaxed mx-auto">
                                         Speak naturally and the AI will analyze your pronunciation, accent patterns, and fluency.
                                     </p>
                                 </div>
-                            </div>
+                            </motion.div>
                         ) : isAnalyzing ? (
-                            <div className="bg-white rounded-3xl p-8 shadow-[0_20px_40px_rgb(0,0,0,0.06)] border border-neutral-100 flex flex-col items-center justify-center min-h-[300px] text-center gap-4">
-                                <Icon icon="line-md:loading-twotone-loop" width="48" className="text-indigo-500" />
-                                <h3 className="font-dm-sans text-lg text-[#111]">Analyzing Speech</h3>
-                                <p className="text-neutral-500 font-sans text-sm max-w-[250px]">Processing pronunciation...</p>
-                            </div>
+                            <motion.div 
+                                key="analyzing" 
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
+                                className="bg-white rounded-[32px] p-8 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col items-center justify-center min-h-[400px] text-center gap-4"
+                            >
+                                <Icon icon="line-md:loading-twotone-loop" width="56" className="text-indigo-500" />
+                                <h3 className="font-dm-sans text-xl font-semibold text-[#111]">Analyzing Speech</h3>
+                                <p className="text-neutral-500 font-sans text-[15px] max-w-[250px]">Processing pronunciation...</p>
+                            </motion.div>
                         ) : (
-                            <div className="bg-white rounded-3xl p-6 sm:p-8 shadow-[0_20px_40px_rgb(0,0,0,0.06)] border border-neutral-100 flex flex-col gap-5">
-                                <div className="flex items-center gap-2 pb-3 border-b border-neutral-100">
-                                    <div className="w-8 h-8 bg-indigo-500 rounded-full flex items-center justify-center">
-                                        <Icon icon="solar:chat-round-dots-bold" width="16" className="text-white" />
+                            <motion.div 
+                                key="results" 
+                                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}
+                                className="bg-white rounded-[32px] p-6 sm:p-8 md:p-10 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col gap-6"
+                            >
+                                <div className="flex items-center gap-3 pb-4 border-b border-neutral-100/80">
+                                    <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center shadow-md">
+                                        <Icon icon="solar:chat-round-dots-bold" width="20" className="text-white" />
                                     </div>
                                     <div className="flex flex-col">
-                                        <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
-                                        <span className="text-xs text-neutral-500 font-sans">Analysis Results</span>
+                                        <span className="text-[17px] font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
+                                        <span className="text-xs text-neutral-500 font-sans font-medium uppercase tracking-wider">Analysis Results</span>
                                     </div>
                                 </div>
 
@@ -619,35 +819,39 @@ const FreeSpeakMode = () => {
                                             <Icon icon="solar:headphones-round-sound-linear" width="16" /> Compare Audio
                                         </h4>
                                         <div className="flex justify-center gap-4">
-                                            <button
+                                            <motion.button
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
                                                 onClick={() => { stopSpeaking(); const a = new Audio(audioUrl); a.play().catch(console.error); }}
-                                                className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+                                                className="w-12 h-12 flex items-center justify-center rounded-full bg-white text-indigo-600 hover:bg-indigo-50 transition-colors shadow-sm"
+                                                title="Replay Your Audio"
                                             >
-                                                <Icon icon="solar:play-circle-linear" width="18" /> Replay Yours
-                                            </button>
-                                            <div className="flex-1 flex gap-2">
-                                                <button
-                                                    onClick={() => speakText({ text: spokenText, accentStyle, rate: autismMode ? 0.7 : 0.9 })}
-                                                    className="flex-[3] flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
-                                                >
-                                                    <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
-                                                </button>
-                                                <button
-                                                    onClick={stopSpeaking}
-                                                    className="flex-1 flex items-center justify-center bg-white border border-neutral-200 py-2.5 rounded-xl text-neutral-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm"
-                                                    title="Stop Audio"
-                                                >
-                                                    <Icon icon="solar:stop-circle-linear" width="18" />
-                                                </button>
-                                            </div>
+                                                <Icon icon="solar:user-speak-linear" width="22" />
+                                            </motion.button>
+                                            <motion.button
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                                onClick={() => {
+                                                    stopSpeaking();
+                                                    speakText({
+                                                        text: transcript || "",
+                                                        accentStyle,
+                                                        rate: autismMode ? 0.8 : 1.0
+                                                    });
+                                                }}
+                                                className="w-12 h-12 flex items-center justify-center rounded-full bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-[0_4px_12px_rgba(79,70,229,0.2)]"
+                                                title="Listen to Native Speaker"
+                                            >
+                                                <Icon icon="solar:headphones-round-sound-bold" width="22" />
+                                            </motion.button>
                                         </div>
                                     </div>
                                 )}
-                            </div>
+                            </motion.div>
                         )}
-                    </>
+                    </AnimatePresence>
                 )}
-            </div>
+            </motion.div>
         </div>
     );
 };

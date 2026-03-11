@@ -47,24 +47,22 @@ export function analyzePronunciationLocal(expectedText: string, transcriptTokens
     }
 
     let mistakes = 0;
+    const spokenWordsSet = new Set(spokenWords);
 
     for (const word of evaluatedExpectedWords) {
         if (word.length < 2) continue;
 
-        // Check if word was roughly spoken
-        const wasSpoken = spokenWords.some(sw => sw === word);
-        const wasFuzzy = spokenWords.some(sw => {
-            if (sw.length < 2 || word.length < 2) return false;
-            if (word.includes(sw) || sw.includes(word)) return true;
-            return false;
-        });
-
-        if (!wasSpoken && !wasFuzzy) {
-            unclearWords.push(word);
-            mistakes += 1;
-        } else if (!wasSpoken && wasFuzzy) {
-            incorrectWords.push(word);
-            mistakes += 0.5;
+        const wasSpoken = spokenWordsSet.has(word);
+        
+        if (!wasSpoken) {
+            const wasFuzzy = spokenWords.some(sw => sw.length >= 2 && (word.includes(sw) || sw.includes(word)));
+            if (!wasFuzzy) {
+                unclearWords.push(word);
+                mistakes += 1;
+            } else {
+                incorrectWords.push(word);
+                mistakes += 0.5;
+            }
         }
     }
 
