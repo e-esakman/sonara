@@ -3,6 +3,7 @@ import { callGeminiWithRetry } from './geminiRetry.ts';
 
 let _aiFeedbackInstance: GoogleGenAI | null = null;
 let _aiPracticeInstance: GoogleGenAI | null = null;
+let _aiFallbackInstance: GoogleGenAI | null = null;
 
 function getAi(isLibraryPractice: boolean) {
     if (isLibraryPractice && process.env.GEMINI_API_KEY) {
@@ -13,7 +14,10 @@ function getAi(isLibraryPractice: boolean) {
         return _aiFeedbackInstance;
     }
     const fallbackKey = process.env.GEMINI_FEEDBACK_KEY || process.env.GEMINI_API_KEY;
-    if (fallbackKey) return new GoogleGenAI({ apiKey: fallbackKey });
+    if (fallbackKey) {
+        if (!_aiFallbackInstance) _aiFallbackInstance = new GoogleGenAI({ apiKey: fallbackKey });
+        return _aiFallbackInstance;
+    }
     return null;
 }
 
@@ -27,7 +31,7 @@ export interface FeedbackResult {
     missing_words?: string[];
     extra_words?: string[];
     coaching_tips?: string[];
-    coach_message?: string[];
+    coach_message?: string | string[];
     accent_detection?: string;
 
     // standard properties
@@ -140,15 +144,16 @@ Rules:
             ...parsed,
             accentInfluence: parsed.accent_detection || 'Unknown',
             suggestions: parsed.coaching_tips || parsed.suggestions || [],
-            tips: parsed.tips || parsed.coach_message ? [parsed.coach_message].filter(Boolean) : [],
+            tips: parsed.tips || (parsed.coach_message
+                ? (Array.isArray(parsed.coach_message) ? parsed.coach_message : [parsed.coach_message]).filter(Boolean)
+                : []),
             phoneticBreakdown: parsed.phoneticBreakdown || {}
         } as FeedbackResult;
     } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
         console.error("Gemini API error in Feedback Agent:", error);
         return {
             phoneticBreakdown: {},
-            tips: [`Error communicating with AI: ${message}`],
+            tips: ["Error communicating with AI. Please try again."],
             suggestions: [],
             accentInfluence: "Unknown"
         };
