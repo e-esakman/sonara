@@ -13,6 +13,9 @@ When users speak English sentences:
 
 Keep responses short and conversational.`;
 
+// Maximum allowed size (bytes) for a single WebSocket message from the client
+const MAX_WS_MESSAGE_BYTES = 512 * 1024; // 512 KB
+
 export function setupLiveProxy(server: Server) {
     const wss = new WebSocketServer({ server, path: '/live-ws' });
 
@@ -68,6 +71,14 @@ export function setupLiveProxy(server: Server) {
 
         clientWs.on('message', (data: WebSocket.RawData) => {
             if (!geminiSession) return;
+
+            // Reject oversized messages to prevent DoS
+            const byteLength = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(data.toString());
+            if (byteLength > MAX_WS_MESSAGE_BYTES) {
+                clientWs.close(1009, 'Message too large');
+                return;
+            }
+
             try {
                 const msg = JSON.parse(data.toString()) as {
                     type: string;

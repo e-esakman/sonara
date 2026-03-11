@@ -144,11 +144,10 @@ Rules:
             phoneticBreakdown: parsed.phoneticBreakdown || {}
         } as FeedbackResult;
     } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : String(error);
         console.error("Gemini API error in Feedback Agent:", error);
         return {
             phoneticBreakdown: {},
-            tips: [`Error communicating with AI: ${message}`],
+            tips: ["Error communicating with AI. Please try again."],
             suggestions: [],
             accentInfluence: "Unknown"
         };
