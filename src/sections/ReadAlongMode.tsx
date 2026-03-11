@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Icon } from '@iconify/react';
 import type { Passage } from '../data/passages';
 import { useSpeechRecognition } from '../hooks/useSpeechRecognition';
@@ -143,7 +143,7 @@ const ReadAlongMode = ({ passage }: Props) => {
         startRecording();
     };
 
-    const playCorrect = () => {
+    const playCorrect = useCallback(() => {
         setCurrentReadingWordIdx(0);
 
         // Use the same sliced text for TTS and offset calculation
@@ -167,25 +167,35 @@ const ReadAlongMode = ({ passage }: Props) => {
             },
             onEnd: () => setCurrentReadingWordIdx(-1)
         });
-    };
+    }, [actualText, accentStyle, autismMode]);
 
     // ─── Word-level highlights: green/red/yellow ─────────────────
-    const renderHighlightedText = () => {
+    const highlightedTextNodes = useMemo(() => {
         const words = actualText.split(/\s+/);
 
-        return words.map((word, idx) => {
-            if (!analysis || analysis.accuracyScore === 0) {
+        if (!analysis || analysis.accuracyScore === 0) {
+            return words.map((word, idx) => {
+                let className = 'inline text-neutral-700 transition-colors duration-300';
+                if (idx === currentReadingWordIdx) {
+                    className += ' ring-2 ring-indigo-400 bg-indigo-50 px-1 rounded';
+                }
                 return (
-                    <span key={idx} className="inline text-neutral-700" style={{ marginRight: '0.3em', whiteSpace: 'nowrap' }}>
+                    <span key={idx} className={className} style={{ marginRight: '0.3em', whiteSpace: 'nowrap' }}>
                         {word}
                     </span>
                 );
-            }
+            });
+        }
 
+        const incorrectSet = new Set(analysis.incorrectWords.map(w => w.toLowerCase()));
+        const unclearSet = new Set((analysis.unclearWords || []).map(w => w.toLowerCase()));
+        const unreadSet = new Set((analysis.unreadWords || []).map(w => w.toLowerCase()));
+
+        return words.map((word, idx) => {
             const clean = word.toLowerCase().replace(/[.,!?;:'"]/g, '');
-            const isIncorrect = analysis.incorrectWords.map(w => w.toLowerCase()).includes(clean);
-            const isUnclear = analysis.unclearWords?.map(w => w.toLowerCase()).includes(clean);
-            const isUnread = analysis.unreadWords?.map(w => w.toLowerCase()).includes(clean);
+            const isIncorrect = incorrectSet.has(clean);
+            const isUnclear = unclearSet.has(clean);
+            const isUnread = unreadSet.has(clean);
 
             let className = 'inline transition-colors duration-300 ';
             if (isIncorrect) {
@@ -214,7 +224,7 @@ const ReadAlongMode = ({ passage }: Props) => {
                 </span>
             );
         });
-    };
+    }, [actualText, analysis, currentReadingWordIdx]);
 
     const renderPhoneticWithStress = (phonetic: string) => {
         return phonetic.split(/([A-Z]+)/).map((part, i) =>
@@ -286,7 +296,7 @@ const ReadAlongMode = ({ passage }: Props) => {
                                 className={`text-base sm:text-lg font-sans max-w-full ${autismMode ? 'leading-loose tracking-wide text-lg' : 'leading-relaxed'}`}
                                 style={{ overflowWrap: 'anywhere', wordBreak: 'keep-all', whiteSpace: 'normal', hyphens: 'none' }}
                             >
-                                {renderHighlightedText()}
+                                {highlightedTextNodes}
                             </p>
                         )}
                     </div>

@@ -17,7 +17,7 @@ export function setupLiveProxy(server: Server) {
     const wss = new WebSocketServer({ server, path: '/live-ws' });
 
     wss.on('connection', async (clientWs: WebSocket) => {
-        const apiKey = process.env.GEMINI_API_KEY;
+        const apiKey = process.env.GEMINI_LIVEVOICE_KEY || process.env.GEMINI_API_KEY;
         if (!apiKey) {
             clientWs.close(1011, 'Server misconfigured: missing API key');
             return;
@@ -29,7 +29,7 @@ export function setupLiveProxy(server: Server) {
 
         try {
             geminiSession = await ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-preview-12-2025',
+                model: 'gemini-2.5-flash-native-audio-latest',
                 callbacks: {
                     onopen: () => {
                         console.log('[LiveProxy] Gemini session opened');
@@ -80,9 +80,9 @@ export function setupLiveProxy(server: Server) {
                         audio: { data: msg.data ?? '', mimeType: msg.mimeType ?? 'audio/pcm;rate=16000' }
                     });
                 } else if (msg.type === 'audioEnd') {
-                    geminiSession.sendRealtimeInput({ audioStreamEnd: true });
+                    // (Optional) geminiSession.sendRealtimeInput([{ ... }]) handles stream ends. We can ignore explicit audioEnd or pass empty array
                 } else if (msg.type === 'clientContent' && msg.turnComplete) {
-                    geminiSession.sendClientContent({ turnComplete: true });
+                    // Removed turnComplete signal as it triggers "Request contains an invalid argument" in Gemini 2.5 Native Audio
                 }
             } catch (e) {
                 console.error('[LiveProxy] Failed to parse client message:', e);

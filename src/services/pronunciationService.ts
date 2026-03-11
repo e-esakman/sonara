@@ -154,22 +154,20 @@ function deriveUnclearWords(
     const maxEvaluationIndex = lastMatchedIndex !== -1 ? lastMatchedIndex + 3 : spokenWords.length + 5;
     const evaluatedExpectedWords = expectedWords.slice(0, maxEvaluationIndex);
 
+    const spokenWordsSet = new Set(spokenWords);
+
     // Words in the attempted portion that were skipped or slurred
     for (const word of evaluatedExpectedWords) {
         if (word.length < 2) continue;
         if (incorrectSet.has(word)) continue;
 
-        // Check if word was roughly spoken (fuzzy match)
-        const wasSpoken = spokenWords.some(sw => sw === word);
-        const wasFuzzy = spokenWords.some(sw => {
-            if (sw.length < 2 || word.length < 2) return false;
-            // simple substring check
-            if (word.includes(sw) || sw.includes(word)) return true;
-            return false;
-        });
-
-        if (!wasSpoken && !wasFuzzy) {
-            unclear.push(word);
+        const wasSpoken = spokenWordsSet.has(word);
+        
+        if (!wasSpoken) {
+            const wasFuzzy = spokenWords.some(sw => sw.length >= 2 && (word.includes(sw) || sw.includes(word)));
+            if (!wasFuzzy) {
+                unclear.push(word);
+            }
         }
     }
 
