@@ -10,6 +10,7 @@ import Sessions from './pages/Sessions';
 import Library from './pages/Library';
 import ReadingViewer from './pages/ReadingViewer';
 import Login from './pages/Login';
+import Grammar from './pages/Grammar';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
           <Route path="/" element={<MainLayout />}>
             <Route index element={<Home />} />
             <Route path="practice" element={<ProtectedRoute><Practice /></ProtectedRoute>} />
+            <Route path="grammar" element={<ProtectedRoute><Grammar /></ProtectedRoute>} />
             <Route path="library" element={<ProtectedRoute><Library /></ProtectedRoute>} />
             <Route path="read/:id" element={<ProtectedRoute><ReadingViewer /></ProtectedRoute>} />
             <Route path="progress" element={<ProtectedRoute><ProgressDashboard /></ProtectedRoute>} />
