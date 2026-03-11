@@ -70,12 +70,18 @@ Rules:
             config: {
                 systemInstruction: systemPrompt,
                 temperature: 0.3,
+                responseMimeType: 'application/json',
             }
         });
 
         const rawText = response.text || "{}";
-        const cleanedText = rawText.replace(/```json\n?|\n?```/g, "").trim();
-        const jsonResponse = JSON.parse(cleanedText);
+        let jsonStr = rawText.replace(/```json\n?|\n?```/g, "").trim();
+        const start = jsonStr.indexOf('{');
+        const end = jsonStr.lastIndexOf('}');
+        if (start !== -1 && end !== -1 && end >= start) {
+            jsonStr = jsonStr.substring(start, end + 1);
+        }
+        const jsonResponse = JSON.parse(jsonStr);
 
         return {
             correction: jsonResponse.correction || text,
