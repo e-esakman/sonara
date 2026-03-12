@@ -2,114 +2,114 @@ import { useState } from 'react';
 import { Icon } from '@iconify/react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-type GrammarTopic = 
-    | 'tenses' 
-    | 'articles-determiners' 
-    | 'prepositions' 
-    | 'sentence-structure' 
-    | 'complex-sentences' 
-    | 'conditionals' 
-    | 'passive-voice' 
-    | 'linking-words' 
-    | 'ielts-mistakes' 
+type GrammarTopic =
+    | 'tenses'
+    | 'articles-determiners'
+    | 'prepositions'
+    | 'sentence-structure'
+    | 'complex-sentences'
+    | 'conditionals'
+    | 'passive-voice'
+    | 'linking-words'
+    | 'ielts-mistakes'
     | 'practice';
 
-const topicsText: Record<GrammarTopic, { title: string, rule: string, examples: string[], ieltsTip: string }> = {
+const topicsText: Record<GrammarTopic, { title: string; rule: string; examples: string[]; ieltsTip: string }> = {
     'tenses': {
         title: 'Verb Tenses',
         rule: 'The present perfect tense connects actions from the past to the present. Past tenses describe finished actions, while future tenses make predictions.',
         examples: [
-            '"I have completed several research projects during my university studies." (Present Perfect)', 
+            '"I have completed several research projects during my university studies." (Present Perfect)',
             '"Many countries have implemented new policies to reduce pollution." (Present Perfect)',
-            '"In 2020, global emissions fell significantly." (Simple Past)'
+            '"In 2020, global emissions fell significantly." (Simple Past)',
         ],
-        ieltsTip: 'Using complex tenses like present perfect or past perfect accurately boosts your "Grammatical Range and Accuracy" score by showing you can operate beyond simple structures.',
+        ieltsTip: 'Using complex tenses like present perfect or past perfect accurately boosts your Grammatical Range and Accuracy score.',
     },
     'articles-determiners': {
         title: 'Articles and Determiners',
-        rule: 'Use "a" or "an" for indefinite or single countable nouns mentioned the first time. Use "the" for specific nouns or concepts everyone understands.',
+        rule: 'Use "a" or "an" for indefinite countable nouns on first mention. Use "the" for specific nouns or shared references.',
         examples: [
-            '"The government must invest in renewable energy." (Specific entity)',
-            '"A major problem in modern cities is traffic congestion." (General condition)',
-            '"Education is crucial for the development of a country." (Abstract concept - no article)'
+            '"The government must invest in renewable energy."',
+            '"A major problem in modern cities is traffic congestion."',
+            '"Education is crucial for the development of a country."',
         ],
-        ieltsTip: 'Incorrect article usage is very common and immediately flags lower band levels. Mastering "the vs. zero article" helps prevent continuous small penalties.',
+        ieltsTip: 'Article mistakes are small but frequent. Fixing them quickly lifts your baseline grammar quality.',
     },
     'prepositions': {
         title: 'Prepositions',
-        rule: 'Prepositions link nouns/pronouns to other words to indicate time, place, or abstract relationships.',
+        rule: 'Prepositions connect nouns and phrases to time, place, direction, and abstract relationships.',
         examples: [
-            '"There has been a significant increase in the number of tourists." (Increase in)',
-            '"Individuals are responsible for their own actions." (Responsible for)',
-            '"The data was collected over a ten-year period." (Over a period)'
+            '"There has been a significant increase in the number of tourists."',
+            '"Individuals are responsible for their own actions."',
+            '"The data was collected over a ten-year period."',
         ],
-        ieltsTip: 'IELTS examiners look for correct prepositional phrases ("according to", "in spite of") to evaluate your phrasing naturalness.',
+        ieltsTip: 'Strong prepositional phrases make your sentences sound more natural and more precise.',
     },
     'sentence-structure': {
         title: 'Sentence Structure',
-        rule: 'In English, writing needs proper subject-verb-object arrangement without run-on fragments.',
+        rule: 'Clear English sentences need a stable subject-verb pattern and should avoid fragments or run-ons.',
         examples: [
-            '"The popularity of electric cars has grown rapidly." (Subject - Verb - Adverb)',
-            '"Children who read regularly develop better vocabularies." (Relative clause integration)'
+            '"The popularity of electric cars has grown rapidly."',
+            '"Children who read regularly develop better vocabularies."',
         ],
-        ieltsTip: 'Avoiding fragments and run-on sentences shows baseline grammatical control necessary for Band 6+.',
+        ieltsTip: 'Sentence control is the foundation for every higher-level grammar skill.',
     },
     'complex-sentences': {
         title: 'Complex Sentences',
-        rule: 'Complex sentences join an independent clause with one or more dependent clauses using subordinating conjunctions.',
+        rule: 'Complex sentences combine one main idea with one or more supporting clauses.',
         examples: [
             '"Although technology has simplified communication, it has also reduced face-to-face interaction."',
-            '"Many people prefer to work from home because it saves commuting time."'
+            '"Many people prefer to work from home because it saves commuting time."',
         ],
-        ieltsTip: 'Band 7+ requires the consistent use of a variety of complex sentence structures with a high degree of accuracy.',
+        ieltsTip: 'Band 7+ writing needs variety, and complex clauses are one of the clearest ways to show it.',
     },
     'conditionals': {
         title: 'Conditionals',
-        rule: 'Conditionals express hypothetical situations and their consequences using "If" clauses.',
+        rule: 'Conditionals express real or imagined results by pairing an if-clause with a consequence.',
         examples: [
-            '"If governments invest in public transport, traffic congestion will decrease." (1st Conditional)',
-            '"If education were free, more people would attend university." (2nd Conditional)'
+            '"If governments invest in public transport, traffic congestion will decrease."',
+            '"If education were free, more people would attend university."',
         ],
-        ieltsTip: 'Using conditionals effectively demonstrates your ability to speculate and evaluate consequences, highly rewarded in Task 2 essays.',
+        ieltsTip: 'Conditionals help you compare outcomes and show stronger reasoning in essays and speech.',
     },
     'passive-voice': {
         title: 'Passive Voice',
-        rule: 'The passive voice shifts focus from the "doer" of the action to the action itself or the receiver.',
+        rule: 'Passive voice shifts attention from the doer to the action or result.',
         examples: [
             '"The new legislation was introduced to curb inflation."',
-            '"Significant amounts of data are generated by social media platforms."'
+            '"Significant amounts of data are generated by social media platforms."',
         ],
-        ieltsTip: 'Passive voice is essential for academic tone in Task 1 (describing processes) and Task 2 (generalizing statements).',
+        ieltsTip: 'Passive voice is especially useful for formal explanation and process description.',
     },
     'linking-words': {
-        title: 'Linking Words (Coherence)',
-        rule: 'Linking words connect ideas logically, showing contrast, addition, cause, or sequence.',
+        title: 'Linking Words',
+        rule: 'Linking words show contrast, addition, cause, and result between ideas.',
         examples: [
             '"Furthermore, renewable energy sources are environmentally friendly."',
             '"Despite the high cost, many consumers prefer organic food."',
-            '"Consequently, the crime rate in the area has dropped."'
+            '"Consequently, the crime rate in the area has dropped."',
         ],
-        ieltsTip: 'Linking devices directly impact your "Coherence and Cohesion" score. Do not mechanically overuse them; use them naturally.',
+        ieltsTip: 'Linking devices improve flow, but they work best when they sound natural rather than forced.',
     },
     'ielts-mistakes': {
         title: 'Common IELTS Mistakes',
-        rule: 'Be aware of frequent errors in subject-verb agreement, uncountable nouns, and informal vocabulary.',
+        rule: 'Watch for repeated errors like subject-verb agreement, article use, and uncountable nouns.',
         examples: [
             'Incorrect: "The informations are..." -> Correct: "The information is..."',
-            'Incorrect: "Nowadays people are..." -> Better: "In modern society, individuals are..."'
+            'Incorrect: "Nowadays people are..." -> Better: "In modern society, individuals are..."',
         ],
-        ieltsTip: 'IELTS examiners deduct points for "systematic errors." Eliminating basic errors in subject-verb agreement secures a stable band score.',
+        ieltsTip: 'Removing repeated mistakes often improves your score faster than chasing advanced grammar too early.',
     },
     'practice': {
-        title: 'IELTS Grammar Practice',
-        rule: 'Put your IELTS grammar skills to the test! Try these exercises or write your own sentence.',
+        title: 'Grammar Practice',
+        rule: 'Write a sentence, test the structure, and let the coach show you how to make it clearer and stronger.',
         examples: [
-            'Sentence correction: "Identify and fix the mistake in your text."',
-            'Rewrite: "Make your simple sentence complex."',
-            'Fill in the blank mentally, then test your full sentence against the AI.'
+            'Sentence correction: identify and fix the mistake in your text.',
+            'Rewrite: turn a simple sentence into a more advanced one.',
+            'Practice: type your own sentence and let the AI coach explain it.',
         ],
-        ieltsTip: 'Practice applying these structures together. The AI will evaluate your estimated Grammar Band Level.',
-    }
+        ieltsTip: 'Practice works best when you alternate between understanding the rule and using it in your own sentences.',
+    },
 };
 
 interface GrammarResult {
@@ -140,6 +140,18 @@ const Grammar = () => {
     const [apiError, setApiError] = useState<string | null>(null);
 
     const activeLesson = topicsText[activeTopic];
+    const topicItems = [
+        { id: 'tenses', label: 'Verb Tenses', icon: 'solar:history-linear' },
+        { id: 'articles-determiners', label: 'Articles', icon: 'solar:text-field-linear' },
+        { id: 'prepositions', label: 'Prepositions', icon: 'solar:link-linear' },
+        { id: 'sentence-structure', label: 'Sentence Structure', icon: 'solar:code-file-linear' },
+        { id: 'complex-sentences', label: 'Complex Sentences', icon: 'solar:branching-paths-up-linear' },
+        { id: 'conditionals', label: 'Conditionals', icon: 'solar:lightbulb-linear' },
+        { id: 'passive-voice', label: 'Passive Voice', icon: 'solar:flip-horizontal-linear' },
+        { id: 'linking-words', label: 'Linking Words', icon: 'solar:link-circle-linear' },
+        { id: 'ielts-mistakes', label: 'IELTS Mistakes', icon: 'solar:close-circle-linear' },
+        { id: 'practice', label: 'Practice', icon: 'solar:keyboard-linear' },
+    ] as const;
 
     const handleCheckGrammar = async () => {
         if (!inputText.trim()) return;
@@ -169,332 +181,302 @@ const Grammar = () => {
     };
 
     return (
-        <div className="bg-[#FAFAFA] min-h-screen pt-36 pb-20">
-            <div className="max-w-[90rem] mx-auto px-6 md:px-12">
-                
-                {/* Header */}
-                <div className="mb-8 border-b border-gray-200 pb-6 flex items-end justify-between">
-                    <div>
-                        <div className="flex items-center gap-3 mb-2">
-                            <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center">
-                                <Icon icon="solar:pen-new-square-linear" width="22" className="text-indigo-600" />
-                            </div>
-                            <h1 className="text-4xl font-dm-sans font-semibold text-[#111] tracking-tight">Grammar Coach</h1>
-                        </div>
-                        <p className="text-neutral-500 font-sans ml-[52px]">Master your grammar rules with interactive AI feedback.</p>
-                    </div>
-                </div>
-
-                <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8 lg:gap-10 items-start">
-                    
-                    {/* Left Sidebar */}
-                    <motion.div 
-                        initial={{ opacity: 0, x: -20 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ duration: 0.35, ease: 'easeOut' }}
-                        className="w-full lg:col-span-3 shrink-0"
-                    >
-                        <h2 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-4 px-2">Grammar Topics</h2>
-                        <ul className="space-y-1.5 flex flex-row lg:flex-col overflow-x-auto lg:overflow-visible pb-2 lg:pb-0">
-                            {[
-                                { id: 'tenses', label: 'Verb Tenses', icon: 'solar:history-linear' },
-                                { id: 'articles-determiners', label: 'Articles & Determiners', icon: 'solar:text-field-linear' },
-                                { id: 'prepositions', label: 'Prepositions', icon: 'solar:link-linear' },
-                                { id: 'sentence-structure', label: 'Sentence Structure', icon: 'solar:code-file-linear' },
-                                { id: 'complex-sentences', label: 'Complex Sentences', icon: 'solar:branching-paths-up-linear' },
-                                { id: 'conditionals', label: 'Conditionals', icon: 'solar:lightbulb-linear' },
-                                { id: 'passive-voice', label: 'Passive Voice', icon: 'solar:flip-horizontal-linear' },
-                                { id: 'linking-words', label: 'Linking Words', icon: 'solar:link-circle-linear' },
-                                { id: 'ielts-mistakes', label: 'IELTS Mistakes', icon: 'solar:close-circle-linear' },
-                                { id: 'practice', label: 'Grammar Practice', icon: 'solar:keyboard-linear' },
-                            ].map((item) => (
-                                <li key={item.id}>
+        <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(212,235,248,0.35),_transparent_26%),linear-gradient(180deg,_#fbfbfa_0%,_#f6f2ec_100%)] pt-36 pb-20">
+            <div className="mx-auto max-w-[90rem] px-6 md:px-12">
+                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[280px_1fr]">
+                    <aside className="rounded-[32px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(247,245,242,0.96)_100%)] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
+                        <p className="mb-5 text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">Grammar Topics</p>
+                        <div className="space-y-2">
+                            {topicItems.map((item) => {
+                                const active = activeTopic === item.id;
+                                return (
                                     <button
+                                        key={item.id}
                                         onClick={() => {
-                                            setActiveTopic(item.id as GrammarTopic);
+                                            setActiveTopic(item.id);
                                             setResult(null);
                                         }}
-                                        className={`w-full whitespace-nowrap text-left px-4 py-3.5 rounded-xl border-l-[3px] font-sans text-sm transition-all duration-200 flex items-center gap-3 ${
-                                            activeTopic === item.id 
-                                                ? 'bg-indigo-50/70 border-l-indigo-600 text-indigo-700 font-bold' 
-                                                : 'bg-transparent border-l-transparent hover:border-l-indigo-200 text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 font-bold'
+                                        className={`w-full rounded-[24px] border px-4 py-4 text-left transition-all duration-200 ${
+                                            active
+                                                ? 'border-indigo-200 bg-indigo-50/90 shadow-sm'
+                                                : 'border-transparent bg-white/55 hover:border-neutral-200 hover:bg-white'
                                         }`}
                                     >
-                                        <Icon icon={item.icon} width="20" />
-                                        {item.label}
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
-                    </motion.div>
-
-                    {/* Center Panel: Lesson & Workspace */}
-                    <div className="w-full lg:col-span-5 min-w-0">
-                        <AnimatePresence mode="wait">
-                            <motion.div
-                                key={activeTopic}
-                                initial={{ opacity: 0, y: 15 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                exit={{ opacity: 0, y: -10 }}
-                                transition={{ duration: 0.25, ease: 'easeOut' }}
-                                className="bg-white rounded-[32px] p-8 sm:p-10 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 relative overflow-hidden h-full flex flex-col"
-                            >
-                                <div className="absolute top-0 right-0 w-80 h-80 bg-violet-50/80 rounded-full blur-3xl opacity-60 -translate-y-1/2 translate-x-1/2 pointer-events-none" />
-                                
-                                <div className="relative z-10 flex-1 flex flex-col">
-                                    <h2 className="text-[28px] md:text-[32px] font-dm-sans font-semibold text-[#111] tracking-tight mb-4">
-                                        {activeLesson.title}
-                                    </h2>
-                                    
-                                    <div className="mb-6">
-                                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2 font-sans">Rule</h3>
-                                        <p className="text-neutral-600 font-sans text-[15px] leading-relaxed bg-neutral-50 p-4 rounded-xl border border-neutral-100">
-                                            {activeLesson.rule}
-                                        </p>
-                                    </div>
-
-                                    <div className="mb-6">
-                                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-3 font-sans">IELTS Example Sentences</h3>
-                                        <ul className="space-y-3">
-                                            {activeLesson.examples.map((ex, idx) => (
-                                                <li key={idx} className="flex gap-3 text-[15px] font-sans text-neutral-700 items-start">
-                                                    <Icon icon="solar:check-circle-linear" className="mt-1 text-emerald-500 shrink-0" width="18" />
-                                                    <span>{ex}</span>
-                                                </li>
-                                            ))}
-                                        </ul>
-                                    </div>
-
-                                    <div className="mb-8">
-                                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-2 font-sans">IELTS Writing Tip</h3>
-                                        <p className="text-[#111] font-sans text-[15px] leading-relaxed bg-amber-50 p-4 rounded-xl border border-amber-100/60 flex items-start gap-3">
-                                            <Icon icon="solar:star-fall-bold-duotone" className="text-amber-500 shrink-0 mt-0.5" width="20" />
-                                            <span>{activeLesson.ieltsTip}</span>
-                                        </p>
-                                    </div>
-
-                                    {/* Practice Exercise Input Area */}
-                                    <div className="mt-auto pt-6 border-t border-neutral-100/80">
-                                        <h3 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-3 font-sans">Try it yourself</h3>
-                                        {activeTopic !== 'practice' && (
-                                            <p className="text-sm text-neutral-500 mb-3 font-sans">Write a sentence describing an achievement or responding to an IELTS essay prompt using this rule.</p>
-                                        )}
-                                        <div className="relative">
-                                            <textarea
-                                                value={inputText}
-                                                onChange={(e) => setInputText(e.target.value)}
-                                                onKeyDown={(e) => {
-                                                    if (e.key === 'Enter' && !e.shiftKey) {
-                                                        e.preventDefault();
-                                                        handleCheckGrammar();
-                                                    }
-                                                }}
-                                                placeholder={activeTopic === 'practice' ? "Type any sentence here..." : "Write a sentence using this rule..."}
-                                                className="w-full bg-neutral-50 border border-neutral-200 text-neutral-700 text-[15px] font-sans px-4 py-4 rounded-2xl outline-none focus:border-indigo-400 focus:bg-white transition-all resize-none shadow-sm placeholder-neutral-400"
-                                                rows={3}
-                                            />
-                                            <button
-                                                onClick={handleCheckGrammar}
-                                                disabled={isAnalyzing || !inputText.trim()}
-                                                className="absolute bottom-3 right-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl p-2 transition-all disabled:opacity-50 disabled:hover:bg-indigo-600 shadow-sm"
-                                            >
-                                                {isAnalyzing ? (
-                                                    <Icon icon="line-md:loading-loop" width="20" />
-                                                ) : (
-                                                    <Icon icon="solar:plain-bold" width="20" />
-                                                )}
-                                            </button>
+                                        <div className="flex items-center gap-3">
+                                            <div className={`flex h-10 w-10 items-center justify-center rounded-2xl ${
+                                                active ? 'bg-white text-indigo-600' : 'bg-neutral-100 text-neutral-500'
+                                            }`}>
+                                                <Icon icon={item.icon} width="20" />
+                                            </div>
+                                            <div>
+                                                <h2 className={`text-base font-dm-sans font-semibold tracking-tight ${
+                                                    active ? 'text-indigo-700' : 'text-[#111]'
+                                                }`}>
+                                                    {item.label}
+                                                </h2>
+                                            </div>
                                         </div>
-                                        {apiError && <p className="text-rose-500 text-sm mt-2">{apiError}</p>}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </aside>
+
+                    <div className="grid grid-cols-1 gap-8 2xl:grid-cols-[1.05fr_0.95fr]">
+                        <motion.section
+                            key={activeTopic}
+                            initial={{ opacity: 0, y: 15 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.25, ease: 'easeOut' }}
+                            className="overflow-hidden rounded-[34px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.82)_0%,rgba(247,245,242,0.98)_100%)] shadow-[0_12px_36px_rgba(0,0,0,0.05)]"
+                        >
+                            <div className="border-b border-[#e6e0d8] px-6 py-5 sm:px-8">
+                                <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400 mb-3">Lesson Focus</p>
+                                <h2 className="text-[30px] font-dm-sans font-semibold tracking-tight text-[#111]">
+                                    {activeLesson.title}
+                                </h2>
+                                <p className="mt-2 text-sm leading-relaxed text-neutral-500 font-sans">
+                                    Learn the pattern first, then try writing your own sentence below.
+                                </p>
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-5 p-5 sm:p-6">
+                                <div className="rounded-[26px] border border-neutral-200 bg-white/75 p-5 shadow-sm">
+                                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Rule</p>
+                                    <p className="text-[15px] leading-relaxed text-neutral-700 font-sans">{activeLesson.rule}</p>
+                                </div>
+
+                                <div className="rounded-[26px] border border-neutral-200 bg-white/75 p-5 shadow-sm">
+                                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-4">Examples</p>
+                                    <div className="space-y-3">
+                                        {activeLesson.examples.map((example, index) => (
+                                            <div key={index} className="flex gap-3 rounded-2xl bg-neutral-50 px-4 py-3 border border-neutral-100">
+                                                <span className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+                                                    <Icon icon="solar:check-circle-linear" width="16" />
+                                                </span>
+                                                <p className="text-sm leading-relaxed text-neutral-700 font-sans">{example}</p>
+                                            </div>
+                                        ))}
                                     </div>
                                 </div>
-                            </motion.div>
-                        </AnimatePresence>
-                    </div>
 
-                    {/* Right Panel: AI Coach Feedback */}
-                    <div className="w-full lg:col-span-4 min-w-0">
+                                <div className="rounded-[26px] border border-amber-100 bg-amber-50/85 p-5 shadow-sm">
+                                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 mb-3">Quick Coaching Note</p>
+                                    <p className="text-sm leading-relaxed text-amber-900 font-sans">{activeLesson.ieltsTip}</p>
+                                </div>
+
+                                <div className="rounded-[28px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                    <div className="mb-4">
+                                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-2">Try It Yourself</p>
+                                        <p className="text-sm text-neutral-500 font-sans">
+                                            {activeTopic === 'practice'
+                                                ? 'Type any sentence and let the coach explain the structure.'
+                                                : 'Write a sentence using this grammar pattern, then send it for analysis.'}
+                                        </p>
+                                    </div>
+
+                                    <div className="relative">
+                                        <textarea
+                                            value={inputText}
+                                            onChange={(e) => setInputText(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter' && !e.shiftKey) {
+                                                    e.preventDefault();
+                                                    handleCheckGrammar();
+                                                }
+                                            }}
+                                            placeholder={activeTopic === 'practice' ? 'Type any sentence here...' : 'Write a sentence using this rule...'}
+                                            className="min-h-[140px] w-full resize-none rounded-[24px] border border-neutral-200 bg-neutral-50 px-4 py-4 text-[15px] text-neutral-700 outline-none transition-all placeholder-neutral-400 focus:border-indigo-300 focus:bg-white font-sans"
+                                        />
+                                        <button
+                                            onClick={handleCheckGrammar}
+                                            disabled={isAnalyzing || !inputText.trim()}
+                                            className="absolute bottom-3 right-3 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#111] text-white shadow-sm transition-colors hover:bg-neutral-800 disabled:opacity-50 disabled:hover:bg-[#111]"
+                                        >
+                                            {isAnalyzing ? <Icon icon="line-md:loading-loop" width="20" /> : <Icon icon="solar:plain-bold" width="20" />}
+                                        </button>
+                                    </div>
+                                    {apiError && <p className="mt-3 text-sm text-rose-500 font-sans">{apiError}</p>}
+                                </div>
+                            </div>
+                        </motion.section>
+
                         <AnimatePresence mode="wait">
                             {!result && !isAnalyzing ? (
-                                <motion.div 
-                                    key="idle" 
-                                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
-                                    className="bg-white rounded-[32px] p-8 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col items-center justify-center min-h-[400px] text-center gap-4"
+                                <motion.section
+                                    key="grammar-idle"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="overflow-hidden rounded-[34px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.82)_0%,rgba(247,245,242,0.98)_100%)] shadow-[0_12px_36px_rgba(0,0,0,0.05)]"
                                 >
-                                    <div className="w-20 h-20 bg-emerald-50/80 rounded-full flex items-center justify-center">
-                                        <Icon icon="solar:book-bookmark-linear" width="40" className="text-emerald-500" />
-                                    </div>
-                                    <div className="mt-2 text-center max-w-[240px]">
-                                        <h3 className="font-dm-sans text-[22px] font-semibold text-[#111] mb-2">AI Grammar Coach</h3>
-                                        <p className="text-neutral-500 font-sans text-[15px] leading-relaxed mx-auto">
-                                            Type a sentence and let the coach analyze your grammar conventions.
+                                    <div className="flex min-h-[780px] flex-col items-center justify-center px-8 py-12 text-center">
+                                        <div className="mb-5 flex h-20 w-20 items-center justify-center rounded-full bg-indigo-100/80 text-indigo-600">
+                                            <Icon icon="solar:document-text-linear" width="36" />
+                                        </div>
+                                        <h3 className="text-3xl font-dm-sans font-semibold tracking-tight text-[#111]">Grammar Feedback Will Appear Here</h3>
+                                        <p className="mt-3 max-w-md text-lg leading-relaxed text-neutral-500 font-sans">
+                                            Write a sentence on the left and the coach will return a rule, structure chart, example breakdown, and quick tip in this panel.
                                         </p>
                                     </div>
-                                </motion.div>
+                                </motion.section>
                             ) : isAnalyzing ? (
-                                <motion.div 
-                                    key="analyzing" 
-                                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
-                                    className="bg-white rounded-[32px] p-8 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col items-center justify-center min-h-[400px] text-center gap-4"
+                                <motion.section
+                                    key="grammar-loading"
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    exit={{ opacity: 0 }}
+                                    className="overflow-hidden rounded-[34px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.82)_0%,rgba(247,245,242,0.98)_100%)] shadow-[0_12px_36px_rgba(0,0,0,0.05)]"
                                 >
-                                    <Icon icon="line-md:loading-twotone-loop" width="56" className="text-indigo-500" />
-                                    <h3 className="font-dm-sans text-xl font-semibold text-[#111]">Reviewing Grammar</h3>
-                                </motion.div>
+                                    <div className="flex min-h-[780px] flex-col items-center justify-center px-8 py-12 text-center">
+                                        <Icon icon="line-md:loading-twotone-loop" width="58" className="text-indigo-500" />
+                                        <h3 className="mt-5 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Reviewing Your Sentence</h3>
+                                        <p className="mt-2 text-sm text-neutral-500 font-sans">Building a clearer rule, chart, and explanation.</p>
+                                    </div>
+                                </motion.section>
                             ) : (
-                                <motion.div 
-                                    key="results" 
-                                    initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: 0.3 }}
-                                    className="bg-white rounded-[32px] p-6 sm:p-8 md:p-10 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col gap-6"
+                                <motion.section
+                                    key="grammar-result"
+                                    initial={{ opacity: 0, y: 10 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    exit={{ opacity: 0 }}
+                                    transition={{ duration: 0.25 }}
+                                    className="overflow-hidden rounded-[34px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.82)_0%,rgba(247,245,242,0.98)_100%)] shadow-[0_12px_36px_rgba(0,0,0,0.05)]"
                                 >
-                                    <div className="flex items-center gap-3 pb-4 border-b border-neutral-100/80">
-                                        <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center shadow-md">
-                                            <Icon icon="solar:chat-round-dots-bold" width="20" className="text-white" />
-                                        </div>
-                                        <div className="flex flex-col">
-                                            <span className="text-[17px] font-semibold text-[#111] font-sans">Grammar Coach</span>
-                                        </div>
-                                    </div>
-
-                                    {/* Correction */}
-                                    <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
-                                        <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Correction</h4>
-                                        <p className="text-[16px] md:text-[18px] font-dm-sans text-[#111]">
-                                            {result?.correction}
-                                        </p>
-                                    </div>
-
-                                    {/* IELTS Feedback Cards */}
-                                    <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6 mt-2">
-                                        <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans mb-3">IELTS Feedback</h4>
-                                        <div className="grid grid-cols-2 gap-3">
-                                            <div className="bg-neutral-50 rounded-xl p-3 border border-neutral-100">
-                                                <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide block mb-1">Accuracy</span>
-                                                <span className="text-sm font-medium text-[#111]">{result?.accuracy || 'Moderate'}</span>
+                                    <div className="border-b border-[#e6e0d8] px-6 py-5 sm:px-8">
+                                        <div className="flex items-center gap-3">
+                                            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm">
+                                                <Icon icon="solar:chat-round-dots-bold" width="20" />
                                             </div>
-                                            <div className="bg-neutral-50 rounded-xl p-3 border border-neutral-100">
-                                                <span className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide block mb-1">Sentence Variety</span>
-                                                <span className="text-sm font-medium text-[#111]">{result?.variety || 'Simple'}</span>
-                                            </div>
-                                        </div>
-                                        <div className="bg-indigo-50/60 rounded-xl p-4 border border-indigo-100 mt-1 flex items-center justify-between">
                                             <div>
-                                                <span className="text-[11px] font-bold text-indigo-500 uppercase tracking-wide block mb-1">Estimated Grammar Band Level</span>
-                                                <span className="text-lg font-dm-sans font-semibold text-indigo-700">{result?.bandEstimate || 'Band 5 - 6'}</span>
-                                            </div>
-                                            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
-                                                <Icon icon="solar:diploma-bold-duotone" width="24" className="text-indigo-600" />
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400">Grammar Coach</p>
+                                                <h3 className="text-xl font-dm-sans font-semibold tracking-tight text-[#111]">Structured Feedback</h3>
                                             </div>
                                         </div>
                                     </div>
 
-                                    {/* Explanation */}
-                                    {result?.rule && (
-                                        <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
-                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Rule</h4>
-                                            <p className="text-[15px] font-sans text-neutral-700 leading-relaxed bg-neutral-50 p-4 rounded-2xl border border-neutral-100">
-                                                {result.rule}
-                                            </p>
+                                    <div className="space-y-5 p-5 sm:p-6">
+                                        <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                            <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Correction</p>
+                                            <p className="text-lg font-dm-sans font-semibold text-[#111]">{result?.correction}</p>
                                         </div>
-                                    )}
 
-                                    {result?.structureChart && result.structureChart.length > 0 && (
-                                        <div className="flex flex-col gap-3 border-b border-neutral-100/80 pb-6">
-                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Structure Chart</h4>
-                                            <div className="overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50">
-                                                <div
-                                                    className="grid gap-px bg-neutral-200 text-sm font-sans"
-                                                    style={{ gridTemplateColumns: `repeat(${getChartColumns(result.structureChart).length}, minmax(0, 1fr))` }}
-                                                >
-                                                    {getChartColumns(result.structureChart).map((column) => (
-                                                        <div key={column} className="bg-neutral-100 px-3 py-2 font-semibold text-neutral-500">
-                                                            {column}
-                                                        </div>
-                                                    ))}
-                                                    {result.structureChart.flatMap((row, rowIndex) =>
-                                                        getChartColumns(result.structureChart).map((column) => (
-                                                            <div key={`${rowIndex}-${column}`} className="bg-white px-3 py-3 text-neutral-700">
-                                                                {row[column] || '—'}
-                                                            </div>
-                                                        ))
-                                                    )}
-                                                </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="rounded-[22px] border border-neutral-200 bg-white p-4 shadow-sm">
+                                                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-400 mb-2">Accuracy</p>
+                                                <p className="text-sm font-semibold text-[#111] font-sans">{result?.accuracy || 'Moderate'}</p>
+                                            </div>
+                                            <div className="rounded-[22px] border border-neutral-200 bg-white p-4 shadow-sm">
+                                                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-neutral-400 mb-2">Variety</p>
+                                                <p className="text-sm font-semibold text-[#111] font-sans">{result?.variety || 'Simple'}</p>
                                             </div>
                                         </div>
-                                    )}
 
-                                    {(result?.exampleSentence || (result?.exampleBreakdown && result.exampleBreakdown.length > 0)) && (
-                                        <div className="flex flex-col gap-3 border-b border-neutral-100/80 pb-6">
-                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Example Breakdown</h4>
-                                            {result.exampleSentence && (
-                                                <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
-                                                    <span className="text-[11px] font-bold text-indigo-500 uppercase tracking-wide block mb-1">Sentence</span>
-                                                    <p className="text-[16px] font-dm-sans text-[#111]">{result.exampleSentence}</p>
+                                        <div className="rounded-[24px] border border-indigo-100 bg-indigo-50/75 p-5 shadow-sm">
+                                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-indigo-500 mb-2">Band Estimate</p>
+                                            <p className="text-xl font-dm-sans font-semibold text-indigo-700">{result?.bandEstimate || 'Band 5 - 6'}</p>
+                                        </div>
+
+                                        {result?.rule && (
+                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Rule</p>
+                                                <p className="text-sm leading-relaxed text-neutral-700 font-sans">{result.rule}</p>
+                                            </div>
+                                        )}
+
+                                        {result?.structureChart && result.structureChart.length > 0 && (
+                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Structure Chart</p>
+                                                <div className="overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50">
+                                                    <div
+                                                        className="grid gap-px bg-neutral-200 text-sm font-sans"
+                                                        style={{ gridTemplateColumns: `repeat(${getChartColumns(result.structureChart).length}, minmax(0, 1fr))` }}
+                                                    >
+                                                        {getChartColumns(result.structureChart).map((column) => (
+                                                            <div key={column} className="bg-neutral-100 px-3 py-2 font-semibold text-neutral-500">
+                                                                {column}
+                                                            </div>
+                                                        ))}
+                                                        {result.structureChart.flatMap((row, rowIndex) =>
+                                                            getChartColumns(result.structureChart).map((column) => (
+                                                                <div key={`${rowIndex}-${column}`} className="bg-white px-3 py-3 text-neutral-700">
+                                                                    {row[column] || '—'}
+                                                                </div>
+                                                            ))
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            )}
-                                            {result.exampleBreakdown && result.exampleBreakdown.length > 0 && (
+                                            </div>
+                                        )}
+
+                                        {(result?.exampleSentence || (result?.exampleBreakdown && result.exampleBreakdown.length > 0)) && (
+                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Example Breakdown</p>
+                                                {result.exampleSentence && (
+                                                    <div className="mb-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+                                                        <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-indigo-500 mb-1">Sentence</p>
+                                                        <p className="text-[16px] font-dm-sans text-[#111]">{result.exampleSentence}</p>
+                                                    </div>
+                                                )}
+                                                {result.exampleBreakdown && result.exampleBreakdown.length > 0 && (
+                                                    <ul className="space-y-2">
+                                                        {result.exampleBreakdown.map((item, index) => (
+                                                            <li key={index} className="flex gap-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-700">
+                                                                <Icon icon="solar:sidebar-code-linear" className="mt-0.5 shrink-0 text-neutral-400" width="16" />
+                                                                <span>{item}</span>
+                                                            </li>
+                                                        ))}
+                                                    </ul>
+                                                )}
+                                            </div>
+                                        )}
+
+                                        {result?.quickTip && (
+                                            <div className="rounded-[24px] border border-amber-100 bg-amber-50/85 p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-amber-700 mb-3">Quick Tip</p>
+                                                <p className="text-sm leading-relaxed text-amber-900 font-sans">{result.quickTip}</p>
+                                            </div>
+                                        )}
+
+                                        {result?.explanation && (
+                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Explanation</p>
+                                                <p className="text-sm leading-relaxed text-neutral-600 font-sans">{result.explanation}</p>
+                                            </div>
+                                        )}
+
+                                        {result?.tips && result.tips.length > 0 && (
+                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Grammar Tips</p>
                                                 <ul className="space-y-2">
-                                                    {result.exampleBreakdown.map((item, index) => (
-                                                        <li key={index} className="flex gap-2 items-start rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-2.5 text-[15px] text-neutral-700">
-                                                            <Icon icon="solar:sidebar-code-linear" className="mt-0.5 shrink-0 text-neutral-400" width="16" />
-                                                            <span>{item}</span>
+                                                    {result.tips.map((tip, index) => (
+                                                        <li key={index} className="flex gap-2 text-sm leading-relaxed text-neutral-700 font-sans">
+                                                            <Icon icon="solar:lightbulb-linear" className="mt-0.5 shrink-0 text-amber-500" width="16" />
+                                                            <span>{tip}</span>
                                                         </li>
                                                     ))}
                                                 </ul>
-                                            )}
-                                        </div>
-                                    )}
+                                            </div>
+                                        )}
 
-                                    {result?.quickTip && (
-                                        <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
-                                            <h4 className="text-amber-700 text-xs font-medium uppercase tracking-tight flex items-center gap-1.5 font-sans mb-1">
-                                                <Icon icon="solar:lightbulb-linear" width="16" /> Quick Tip
-                                            </h4>
-                                            <p className="text-[15px] text-amber-900 leading-relaxed font-sans rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
-                                                {result.quickTip}
-                                            </p>
-                                        </div>
-                                    )}
-
-                                    {result?.explanation && (
-                                        <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
-                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Explanation</h4>
-                                            <p className="text-[15px] font-sans text-neutral-600 leading-relaxed bg-neutral-50 p-4 rounded-2xl border border-neutral-100">
-                                                {result.explanation}
-                                            </p>
-                                        </div>
-                                    )}
-
-                                    {/* Tips */}
-                                    {result?.tips && result.tips.length > 0 && (
-                                        <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
-                                            <h4 className="text-amber-700 text-xs font-medium uppercase tracking-tight flex items-center gap-1.5 font-sans mb-1">
-                                                <Icon icon="solar:lightbulb-linear" width="16" /> Grammar Tips
-                                            </h4>
-                                            <ul className="text-[15px] text-amber-900 leading-relaxed font-sans space-y-2 list-disc pl-4">
-                                                {result.tips.map((tip, i) => <li key={i}>{tip}</li>)}
-                                            </ul>
-                                        </div>
-                                    )}
-
-                                    {/* Suggestions */}
-                                    {result?.suggestions && result.suggestions.length > 0 && (
-                                        <div className="flex flex-col gap-2">
-                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans mb-1">Suggestions</h4>
-                                            <ul className="text-[15px] text-neutral-700 leading-relaxed font-sans space-y-2">
-                                                {result.suggestions.map((sug, i) => (
-                                                    <li key={i} className="flex gap-2 items-start py-1.5 px-3 bg-neutral-50 rounded-lg border border-neutral-100">
-                                                        <Icon icon="solar:forward-linear" className="mt-1 text-neutral-400 shrink-0" width="16" />
-                                                        <span>{sug}</span>
-                                                    </li>
-                                                ))}
-                                            </ul>
-                                        </div>
-                                    )}
-                                </motion.div>
+                                        {result?.suggestions && result.suggestions.length > 0 && (
+                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Suggestions</p>
+                                                <ul className="space-y-2">
+                                                    {result.suggestions.map((suggestion, index) => (
+                                                        <li key={index} className="flex gap-2 rounded-2xl border border-neutral-100 bg-neutral-50 px-3 py-2.5 text-sm text-neutral-700 font-sans">
+                                                            <Icon icon="solar:forward-linear" className="mt-0.5 shrink-0 text-neutral-400" width="16" />
+                                                            <span>{suggestion}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            </div>
+                                        )}
+                                    </div>
+                                </motion.section>
                             )}
                         </AnimatePresence>
                     </div>
-
                 </div>
             </div>
         </div>

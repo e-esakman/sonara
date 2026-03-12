@@ -82,17 +82,17 @@ const renderPattern = (type: string, accent: string) => {
 const BookCard = ({ passage }: Props) => {
     // Generate inner color slightly lighter than cover
     return (
-        <Link to={`/read/${passage.id}`} className="group flex flex-col gap-5 w-full outline-none">
+        <Link to={`/read/${passage.id}`} className="group flex flex-col gap-4 w-full max-w-[220px] mx-auto outline-none">
             <div
-                className="relative h-[400px] rounded-[28px] p-4 transition-all duration-500 ease-out group-hover:-translate-y-2 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.2)]"
+                className="relative h-[320px] rounded-[22px] p-3 transition-all duration-500 ease-out group-hover:-translate-y-2 group-hover:rotate-[0.5deg] hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.18)] before:absolute before:inset-y-3 before:-left-2 before:w-3 before:rounded-l-[12px] before:bg-black/8 before:opacity-80"
                 style={{ backgroundColor: passage.coverColor }}
             >
                 <div
-                    className="relative h-full w-full rounded-2xl shadow-[0_8px_30px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col bg-white/90"
+                    className="relative h-full w-full rounded-[16px] shadow-[0_8px_20px_rgba(0,0,0,0.08)] overflow-hidden flex flex-col bg-white/90"
                     style={{ backgroundColor: passage.innerColor || '#FFFFFF' }}
                 >
                     <h3
-                        className="text-2xl font-bold tracking-tight mt-8 ml-8 z-10 font-dm-sans"
+                        className="text-xl font-bold tracking-tight mt-6 ml-6 z-10 font-dm-sans"
                         style={{ color: passage.accentColor }}
                     >
                         {passage.title.split(' ').map((word, i) => (
@@ -104,7 +104,7 @@ const BookCard = ({ passage }: Props) => {
                 </div>
             </div>
 
-            <div className="px-2 flex flex-col gap-2">
+            <div className="px-1 flex flex-col gap-2">
                 <div className="flex items-center gap-2 text-xs text-gray-500 uppercase tracking-widest font-medium">
                     <span className={`${getDifficultyColors(passage.difficulty)} px-2.5 py-1 rounded-full`}>
                         {passage.difficulty}

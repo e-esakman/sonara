@@ -256,10 +256,14 @@ const DemoSection = () => {
     }, [activeTab]);
 
     return (
-        <section className="w-full py-20 bg-white px-6">
-            <div className="max-w-5xl mx-auto">
+        <section className="w-full py-20 px-6 bg-[radial-gradient(circle_at_top,_rgba(212,235,248,0.45),_transparent_34%),linear-gradient(180deg,_#f9fbff_0%,_#ffffff_48%,_#f7f5f2_100%)]">
+            <div className="max-w-5xl mx-auto relative">
+                <div className="pointer-events-none absolute inset-x-0 top-6 h-40 rounded-[2.5rem] bg-[linear-gradient(90deg,rgba(99,102,241,0.08)_1px,transparent_1px),linear-gradient(rgba(16,185,129,0.08)_1px,transparent_1px)] bg-[size:24px_24px] opacity-50 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
+                <div className="pointer-events-none absolute -left-10 top-28 h-40 w-40 rounded-full bg-[radial-gradient(circle,_rgba(99,102,241,0.18),_transparent_70%)] blur-2xl" />
+                <div className="pointer-events-none absolute -right-8 bottom-10 h-48 w-48 rounded-full bg-[radial-gradient(circle,_rgba(52,211,153,0.16),_transparent_72%)] blur-2xl" />
+
                 {/* Section heading */}
-                <div className="text-center mb-10">
+                <div className="text-center mb-10 relative z-10">
                     <div className="text-sm font-medium tracking-tight text-neutral-400 mb-4 uppercase font-sans">
                         Interactive Preview
                     </div>
@@ -272,8 +276,8 @@ const DemoSection = () => {
                 </div>
 
                 {/* Tab Toggle */}
-                <div className="flex justify-center mb-8">
-                    <div className="inline-flex items-center gap-1 bg-white rounded-xl p-1 border border-neutral-200/80 shadow-sm">
+                <div className="flex justify-center mb-8 relative z-10">
+                    <div className="inline-flex items-center gap-1 bg-white/85 backdrop-blur rounded-xl p-1 border border-neutral-200/80 shadow-sm">
                         {DEMO_TABS.map(tab => (
                             <button
                                 key={tab.id}
@@ -291,7 +295,10 @@ const DemoSection = () => {
                 </div>
 
                 {/* Demo Content */}
-                <div className="bg-neutral-50 rounded-[2rem] p-6 sm:p-8 border border-neutral-100 shadow-[0_20px_60px_rgba(0,0,0,0.05)] max-w-3xl mx-auto">
+                <div className="relative z-10 max-w-3xl mx-auto overflow-hidden rounded-[2rem] border border-neutral-100 bg-[linear-gradient(180deg,rgba(255,255,255,0.82)_0%,rgba(247,245,242,0.9)_100%)] p-6 shadow-[0_20px_60px_rgba(0,0,0,0.05)] sm:p-8">
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(99,102,241,0.12),transparent_28%),radial-gradient(circle_at_bottom_left,rgba(245,158,11,0.1),transparent_24%)]" />
+                    <div className="pointer-events-none absolute right-5 top-5 h-14 w-14 bg-[linear-gradient(90deg,#6366f1_25%,transparent_25%,transparent_50%,#6366f1_50%,#6366f1_75%,transparent_75%,transparent),linear-gradient(#6366f1_25%,transparent_25%,transparent_50%,#6366f1_50%,#6366f1_75%,transparent_75%,transparent)] bg-[length:12px_12px] opacity-[0.09]" />
+                    <div className="pointer-events-none absolute bottom-6 left-6 h-10 w-10 bg-[linear-gradient(90deg,#10b981_25%,transparent_25%,transparent_50%,#10b981_50%,#10b981_75%,transparent_75%,transparent),linear-gradient(#10b981_25%,transparent_25%,transparent_50%,#10b981_50%,#10b981_75%,transparent_75%,transparent)] bg-[length:10px_10px] opacity-[0.09]" />
                     <AnimatePresence mode="wait">
                         <motion.div
                             key={`${activeTab}-${key}`}
@@ -299,6 +306,7 @@ const DemoSection = () => {
                             animate={{ opacity: 1, y: 0 }}
                             exit={{ opacity: 0, y: -8 }}
                             transition={{ duration: 0.3 }}
+                            className="relative"
                         >
                             {activeTab === 'pronunciation' && <PronunciationDemo />}
                             {activeTab === 'ai-coach' && <AICoachDemo />}
