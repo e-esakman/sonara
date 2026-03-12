@@ -14,8 +14,11 @@ const Navigation = () => {
         { to: '/practice', label: 'Practice' },
         { to: '/grammar', label: 'Grammar' },
         { to: '/library', label: 'Library' },
+    ];
+
+    const userLinks = [
+        { to: '/dashboard', label: 'Dashboard' },
         { to: '/progress', label: 'Progress' },
-        { to: '/analytics', label: 'Analytics' },
         { to: '/sessions', label: 'Sessions' },
     ];
 
@@ -106,11 +109,22 @@ const Navigation = () => {
                     <div className="flex items-center gap-3 text-sm font-medium shrink-0">
                         {user ? (
                             <div className="hidden lg:flex items-center relative group/user">
-                                <button className="flex items-center gap-2 text-sm font-medium text-neutral-600 px-3 py-2 rounded-full hover:bg-neutral-50 transition-all">
-                                    {user.name}
+                                <button className="flex items-center gap-2 text-sm font-medium text-neutral-600 p-2 rounded-full hover:bg-neutral-50 transition-all">
+                                    <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center">
+                                        <Icon icon="solar:user-circle-linear" width="20" />
+                                    </div>
                                     <Icon icon="solar:alt-arrow-down-linear" width="14" />
                                 </button>
-                                <div className="absolute top-full right-0 mt-2 w-32 bg-white rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.12)] border border-neutral-200/60 p-1 opacity-0 invisible group-hover/user:opacity-100 group-hover/user:visible transition-all z-50">
+                                <div className="absolute top-full right-0 mt-2 w-44 bg-white rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.12)] border border-neutral-200/60 p-1 opacity-0 invisible group-hover/user:opacity-100 group-hover/user:visible transition-all z-50">
+                                    {userLinks.map((link) => (
+                                        <Link
+                                            key={link.to}
+                                            to={link.to}
+                                            className="block px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50 rounded-lg transition-colors font-medium"
+                                        >
+                                            {link.label}
+                                        </Link>
+                                    ))}
                                     <button
                                         onClick={handleLogout}
                                         className="w-full text-left px-4 py-2 text-sm text-rose-500 hover:bg-rose-50 rounded-lg transition-colors font-medium"
@@ -124,9 +138,6 @@ const Navigation = () => {
                                 Sign in
                             </Link>
                         )}
-                        <Link to={user ? "/library" : "/login"} className="hidden lg:block bg-[#111] text-white px-5 py-2.5 rounded-full hover:bg-neutral-800 transition-colors tracking-tight font-sans text-sm shadow-sm">
-                            Get Started
-                        </Link>
 
                         {/* Mobile Menu Button */}
                         <button className="lg:hidden text-[#111] p-1.5" onClick={() => setIsOpen(!isOpen)}>
@@ -148,6 +159,18 @@ const Navigation = () => {
                         <p className="text-xs uppercase font-bold text-neutral-400 tracking-wider">Accessibility Options</p>
                         {user && (
                             <div className="flex flex-col gap-3">
+                                <div className="flex flex-col gap-1">
+                                    {userLinks.map((link) => (
+                                        <Link
+                                            key={link.to}
+                                            to={link.to}
+                                            onClick={() => setIsOpen(false)}
+                                            className="p-3 rounded-xl border text-sm font-sans transition-all bg-neutral-50 text-neutral-600 border-neutral-200 hover:bg-neutral-100"
+                                        >
+                                            {link.label}
+                                        </Link>
+                                    ))}
+                                </div>
                                 <button
                                     onClick={toggleAutismMode}
                                     className={`flex items-center justify-between p-3 rounded-xl border text-sm font-sans transition-all ${autismMode ? 'bg-violet-50 text-violet-700 border-violet-200' : 'bg-neutral-50 text-neutral-600 border-neutral-200 hover:bg-neutral-100'}`}

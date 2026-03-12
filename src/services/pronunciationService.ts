@@ -1,14 +1,30 @@
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3000';
 
+export interface WordStatus {
+    word: string;
+    status: 'correct' | 'incorrect' | 'unclear' | 'unread';
+    score: number;
+}
+
 export interface AnalysisResult {
     accuracyScore: number;
     incorrectWords: string[];
     unclearWords?: string[];
     unreadWords?: string[];
+    wordAnalysis?: WordStatus[];
+    wordScores?: { word: string; score: number }[];
+    analysis?: {
+        mispronounced_words: string[];
+        phonetic: { [word: string]: string };
+        unclear_words: string[];
+        unread_words: string[];
+    };
     phoneticBreakdown: { [key: string]: string };
     tips: string[];
     accentInfluence?: string;
     suggestions?: string[];
+    coachMessage?: string;
+    speakCorrectWords?: string[];
 }
 
 // ─── Retry Logic for 503 errors ──────────────────────────────────
@@ -73,9 +89,14 @@ export const analyzePronunciation = async (
             accuracyScore: 0,
             incorrectWords: [],
             unclearWords: [],
+            unreadWords: [],
+            wordAnalysis: [],
+            wordScores: [],
             phoneticBreakdown: {},
             tips: ['Please read a full sentence or phrase for accurate pronunciation analysis.'],
             suggestions: ['Try reading at least 4–5 words so the AI can evaluate your pronunciation properly.'],
+            coachMessage: 'Say a longer sentence so I can give pronunciation coaching.',
+            speakCorrectWords: [],
         };
     }
 
@@ -97,6 +118,14 @@ export const analyzePronunciation = async (
             data.unclearWords = deriveUnclearWords(expectedText, transcript, data.incorrectWords);
         }
 
+        if (!data.coachMessage) {
+            data.coachMessage = buildFallbackCoachMessage(data);
+        }
+
+        if (!data.speakCorrectWords) {
+            data.speakCorrectWords = data.incorrectWords || [];
+        }
+
         return data;
     } catch (error) {
         console.warn('Backend API unavailable, using mock AI evaluation.');
@@ -110,6 +139,11 @@ export const analyzePronunciation = async (
             accuracyScore: 82,
             incorrectWords: mockIncorrect ? [mockIncorrect] : [],
             unclearWords: mockUnclear ? [mockUnclear] : [],
+            wordAnalysis: words.map((word) => ({
+                word: word.replace(/[.,!?;:'"]/g, ''),
+                status: word.replace(/[.,!?;:'"]/g, '') === mockIncorrect ? 'incorrect' : word.replace(/[.,!?;:'"]/g, '') === mockUnclear ? 'unclear' : 'correct',
+                score: word.replace(/[.,!?;:'"]/g, '') === mockIncorrect ? 0.48 : word.replace(/[.,!?;:'"]/g, '') === mockUnclear ? 0.72 : 0.92,
+            })),
             phoneticBreakdown: mockIncorrect ? { [mockIncorrect]: 'kawn·fuh·dns' } : {},
             tips: [
                 'You are speaking slightly too fast. Try slowing down for clearer enunciation.',
@@ -119,7 +153,11 @@ export const analyzePronunciation = async (
                 `Make sure to clearly pronounce "${mockIncorrect}".`,
                 'Take a deeper breath before starting long sentences.'
             ],
-            accentInfluence: 'Neutral English'
+            accentInfluence: 'Neutral English',
+            coachMessage: mockIncorrect
+                ? `Word needing improvement: *${mockIncorrect}*\nCorrect pronunciation:\n/${'kawn·fuh·dns'}/\nBreakdown:\nkawn·fuh·dns\nTip:\nListen and repeat this word slowly.\nSpeakCorrectWord: ${mockIncorrect}`
+                : 'Your pronunciation was mostly clear. Repeat the sentence once more.',
+            speakCorrectWords: mockIncorrect ? [mockIncorrect] : [],
         };
     }
 };
@@ -172,4 +210,25 @@ function deriveUnclearWords(
     }
 
     return [...new Set(unclear)];
+}
+
+function buildFallbackCoachMessage(result: AnalysisResult): string {
+    const focusWords = [...(result.incorrectWords || []), ...(result.unclearWords || [])].slice(0, 3);
+    if (focusWords.length === 0) {
+        return 'Your pronunciation was mostly clear. Repeat the sentence once more.';
+    }
+
+    return focusWords.map((word) => {
+        const phonetic = result.phoneticBreakdown?.[word] || 'listen and repeat';
+        return [
+            `Word needing improvement: *${word}*`,
+            'Correct pronunciation:',
+            phonetic.startsWith('/') ? phonetic : `/${phonetic}/`,
+            'Breakdown:',
+            phonetic,
+            'Tip:',
+            'Listen and repeat this word slowly.',
+            `SpeakCorrectWord: ${word}`
+        ].join('\n');
+    }).join('\n\n');
 }

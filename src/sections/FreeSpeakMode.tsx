@@ -14,6 +14,55 @@ interface FreeSpeakModeProps {
     titleMode?: 'free-speak' | 'speech-analysis' | 'live-coach';
 }
 
+const META_COACH_PATTERNS = [
+    /\b(evaluating|re-evaluated|refining|confirming|analyzing|analysis|strategizing|planning|preparing|noted|homing in on|focusing on|clarifying|crafting|intention|goal)\b/,
+    /\b(the user|they are|their progress|performance in this area|another evaluation|positive reinforcement|lingering slight mispronunciation)\b/,
+    /\b(i|i'm|i’ve|i have|my)\b/,
+];
+
+const USER_FACING_PATTERNS = [
+    /\/[^/]+\/$/,
+    /\b(you|your|try|repeat|focus|stress|sound|syllable|pronunciation|listen|say|word|practice|again|slowly|correct)\b/,
+];
+
+const sanitizeCoachChunk = (text: string) => {
+    const normalized = text
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const sentences = normalized
+        .split(/(?<=[.!?])\s+/)
+        .map(sentence => sentence.trim())
+        .filter(Boolean);
+
+    const filtered = sentences.filter(sentence => {
+        const lower = sentence.toLowerCase();
+
+        if (/^(clarifying|evaluating|refining|confirming|focusing)\b/i.test(sentence)) {
+            return false;
+        }
+
+        return !META_COACH_PATTERNS.some(pattern => pattern.test(lower));
+    });
+
+    const userFacing = filtered.filter(sentence =>
+        USER_FACING_PATTERNS.some(pattern => pattern.test(sentence.toLowerCase()) || pattern.test(sentence))
+    );
+
+    const metaDetected = sentences.some(sentence =>
+        META_COACH_PATTERNS.some(pattern => pattern.test(sentence.toLowerCase()))
+        || /^(clarifying|evaluating|refining|confirming|focusing)\b/i.test(sentence)
+    );
+
+    const sanitized = (userFacing.length > 0 ? userFacing : metaDetected ? [] : filtered)
+        .join(' ')
+        .replace(/\s+([,.!?;:])/g, '$1')
+        .trim();
+
+    return sanitized;
+};
+
 const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode = 'free-speak' }: FreeSpeakModeProps) => {
     const { addSession, autismMode, accentStyle } = useStore();
 
@@ -27,6 +76,15 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
         startRecording,
         stopRecording,
     } = useSpeechRecognition();
+    const {
+        transcript: liveTranscript,
+        startRecording: startLiveTranscriptRecording,
+        stopRecording: stopLiveTranscriptRecording,
+    } = useSpeechRecognition({
+        continuous: true,
+        interimResults: false,
+        lang: 'en-US',
+    });
 
     const [coachMode, setCoachMode] = useState<'standard' | 'live'>(initialMode);
     const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
@@ -41,17 +99,21 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
     const [liveStatus, setLiveStatus] = useState<string>('Disconnected');
     const [liveRecording, setLiveRecording] = useState(false);
     const [liveUserTranscript, setLiveUserTranscript] = useState('');
+    const [lastLiveTranscript, setLastLiveTranscript] = useState('');
     const audioContextRef = useRef<AudioContext | null>(null);
     const micContextRef = useRef<AudioContext | null>(null);
     const audioQueueRef = useRef<AudioBufferSourceNode[]>([]);
     const liveStreamRef = useRef<MediaStream | null>(null);
     const liveRecorderRef = useRef<ScriptProcessorNode | null>(null);
     const nextAudioTimeRef = useRef<number>(0);
+    const liveRecordingRef = useRef(false);
+    const coachAudioPlayingRef = useRef(false);
 
     const stopAudioPlayback = useCallback(() => {
         audioQueueRef.current.forEach(source => { try { source.stop(); } catch (e) { } });
         audioQueueRef.current = [];
         nextAudioTimeRef.current = 0;
+        coachAudioPlayingRef.current = false;
         geminiLiveService.interrupt();
     }, []);
 
@@ -62,16 +124,23 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
         geminiLiveService.onStatus = setLiveStatus;
         
         geminiLiveService.onTextResponse = (t) => {
+            const sanitizedText = sanitizeCoachChunk(t);
+            if (!sanitizedText) return;
+
             setLiveMessages(prev => {
                 const last = prev[prev.length - 1];
                 if (currentCoachTurnIdRef.current && last && last.id === currentCoachTurnIdRef.current) {
                     const updated = [...prev];
-                    updated[updated.length - 1] = { ...last, text: last.text + ' ' + t };
+                    const nextCoachText = sanitizeCoachChunk(`${last.text} ${sanitizedText}`);
+                    updated[updated.length - 1] = {
+                        ...last,
+                        text: nextCoachText,
+                    };
                     return updated;
                 } else {
                     const newId = crypto.randomUUID();
                     currentCoachTurnIdRef.current = newId;
-                    return [...prev, { id: newId, role: 'coach', text: t }];
+                    return [...prev, { id: newId, role: 'coach', text: sanitizedText }];
                 }
             });
         };
@@ -82,6 +151,8 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
 
         geminiLiveService.onAudioResponse = (base64Audio) => {
             try {
+                coachAudioPlayingRef.current = true;
+
                 const binaryString = atob(base64Audio);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
@@ -110,6 +181,9 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
                 source.onended = () => {
                     const idx = audioQueueRef.current.indexOf(source);
                     if (idx > -1) audioQueueRef.current.splice(idx, 1);
+                    if (audioQueueRef.current.length === 0) {
+                        coachAudioPlayingRef.current = false;
+                    }
                 };
             } catch (e) { console.error('[FreeSpeakMode] Audio error:', e); }
         };
@@ -141,8 +215,22 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
         role: 'coach',
         text: "Hi there! I'm Nova, your AI pronunciation coach. Tap the microphone and say something, and we can start practicing together!"
     }]);
-    const [isLiveAnalyzing, setIsLiveAnalyzing] = useState(false);
-    const liveSpeechRef = useRef<any>(null);
+
+    useEffect(() => {
+        if (coachMode !== 'live' || !liveTranscript.trim() || liveTranscript === lastLiveTranscript) {
+            return;
+        }
+
+        const chunkText = liveTranscript.trim();
+        const msgId = crypto.randomUUID();
+
+        setLiveMessages(prev => [...prev, { id: msgId, role: 'user', text: chunkText }]);
+        setLastLiveTranscript(liveTranscript);
+
+        analyzePronunciation(chunkText, chunkText, accentStyle)
+            .then(result => setLiveMessages(prev => prev.map(m => m.id === msgId ? { ...m, analysis: result } : m)))
+            .catch(e => console.error(e));
+    }, [accentStyle, coachMode, lastLiveTranscript, liveTranscript]);
 
     // Standard analysis on stop
     useEffect(() => {
@@ -216,12 +304,14 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
         setLiveUserTranscript('');
         setAnalysis(null);
         setWordsPerMinute(null);
+        setLastLiveTranscript('');
         if (newMode === 'live') {
             await geminiLiveService.startSession();
         } else {
             geminiLiveService.stopSession();
             stopAudioPlayback();
             stopLiveRecording();
+            stopLiveTranscriptRecording();
         }
     };
 
@@ -268,47 +358,21 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
 
             liveRecorderRef.current = processor;
             setLiveRecording(true);
-            
-            // --- Live Speech Recognition for UI Text ---
-            const SpeechRecognitionAPI = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
-            if (SpeechRecognitionAPI) {
-                const recognition = new SpeechRecognitionAPI();
-                recognition.continuous = true;
-                recognition.interimResults = false;
-                recognition.lang = 'en-US';
-                
-                recognition.onresult = (event: any) => {
-                    let finalChunk = '';
-                    for (let i = event.resultIndex; i < event.results.length; ++i) {
-                        if (event.results[i].isFinal) finalChunk += event.results[i][0].transcript;
-                    }
-                    if (finalChunk.trim()) {
-                        const chunkText = finalChunk.trim();
-                        const msgId = crypto.randomUUID();
-                        // Add message
-                        setLiveMessages(prev => [...prev, { id: msgId, role: 'user', text: chunkText }]);
-                        
-                        setIsLiveAnalyzing(true);
-                        analyzePronunciation(chunkText, chunkText, accentStyle)
-                            .then(result => setLiveMessages(prev => prev.map(m => m.id === msgId ? { ...m, analysis: result } : m)))
-                            .catch(e => console.error(e))
-                            .finally(() => setIsLiveAnalyzing(false));
-                    }
-                };
-                recognition.onerror = (e: any) => console.log('Live speech err:', e.error);
-                recognition.start();
-                liveSpeechRef.current = recognition;
-            }
+            liveRecordingRef.current = true;
+            setLastLiveTranscript('');
+            startLiveTranscriptRecording();
 
         } catch (e) {
             console.error('[FreeSpeakMode] Mic error:', e);
             setLiveRecording(false);
+            liveRecordingRef.current = false;
         }
-    }, [stopAudioPlayback, accentStyle]);
+    }, [startLiveTranscriptRecording, stopAudioPlayback, accentStyle]);
 
     const stopLiveRecording = useCallback(() => {
         if (!liveRecording && !liveRecorderRef.current) return;
         setLiveRecording(false);
+        liveRecordingRef.current = false;
         geminiLiveService.sendAudioStreamEnd();
         if (liveRecorderRef.current) {
             liveRecorderRef.current.disconnect();
@@ -318,11 +382,8 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
             liveStreamRef.current.getTracks().forEach(t => t.stop());
             liveStreamRef.current = null;
         }
-        if (liveSpeechRef.current) {
-            liveSpeechRef.current.stop();
-            liveSpeechRef.current = null;
-        }
-    }, [liveRecording]);
+        stopLiveTranscriptRecording();
+    }, [liveRecording, stopLiveTranscriptRecording]);
 
     const toggleLiveRecording = useCallback(async () => {
         if (liveRecording) {
@@ -382,13 +443,13 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
     };
 
     return (
-        <div className="flex flex-col lg:grid lg:grid-cols-12 gap-8 lg:gap-10 items-start">
+        <div className={`flex flex-col ${coachMode === 'live' ? '' : 'lg:grid lg:grid-cols-12'} gap-8 lg:gap-10 items-start`}>
             {/* Left: Speaking area */}
             <motion.div 
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.35, ease: 'easeOut' }}
-                className="w-full lg:col-span-7"
+                className={`w-full ${coachMode === 'live' ? '' : 'lg:col-span-7'}`}
             >
                 <div className="bg-white rounded-[32px] p-8 sm:p-10 md:p-12 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 relative overflow-hidden">
                     <div className="absolute top-0 right-0 w-80 h-80 bg-violet-50/80 rounded-full blur-3xl opacity-60 -translate-y-1/2 translate-x-1/2 pointer-events-none" />
@@ -432,6 +493,9 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
                             <div className="flex-1 overflow-y-auto p-2 sm:p-4 flex flex-col gap-6 max-h-[400px]">
                                 {liveMessages.map((msg) => {
                                     if (msg.role === 'coach') {
+                                        const coachText = sanitizeCoachChunk(msg.text);
+                                        if (!coachText) return null;
+
                                         return (
                                             <div key={msg.id} className="flex gap-3 sm:gap-4 max-w-[90%] sm:max-w-[85%]">
                                                 <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center mt-1 flex-shrink-0">
@@ -439,7 +503,7 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
                                                 </div>
                                                 <div className="bg-white border border-neutral-200 rounded-2xl rounded-tl-sm p-3 sm:p-4 shadow-sm">
                                                     <p className="text-sm sm:text-base font-sans text-neutral-800 leading-relaxed" style={{ wordWrap: 'break-word', overflowWrap: 'break-word' }}>
-                                                        {msg.text.trim()}
+                                                        {coachText}
                                                     </p>
                                                     <span className="text-xs text-neutral-400 mt-2 block font-sans">
                                                         Just now
@@ -608,103 +672,13 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
             </motion.div>
 
             {/* Right: Analysis panel */}
+            {coachMode !== 'live' && (
             <motion.div 
                 initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.35, delay: 0.1, ease: 'easeOut' }}
                 className="w-full lg:col-span-5"
             >
-        {coachMode === 'live' ? (
-            <div className="bg-white rounded-[32px] p-6 sm:p-8 md:p-10 shadow-[0_12px_40px_rgb(0,0,0,0.06)] border border-neutral-100/80 flex flex-col gap-5 min-h-[300px]">
-                <div className="flex items-center gap-3 pb-4 border-b border-neutral-100/80">
-                    <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center shadow-md">
-                        <Icon icon="solar:chat-round-dots-bold" width="20" className="text-white" />
-                    </div>
-                    <div className="flex flex-col">
-                        <span className="text-sm font-semibold text-[#111] font-sans">Nova — your AI pronunciation coach</span>
-                    </div>
-                </div>
-
-                {liveStatus === 'Disconnected' ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
-                        <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center">
-                            <Icon icon="solar:microphone-3-bold-duotone" width="32" className="text-indigo-400" />
-                        </div>
-                        <p className="text-neutral-500 font-sans text-sm max-w-[280px]">
-                            Connected to Live AI Coach
-                        </p>
-                    </div>
-                ) : isLiveAnalyzing ? (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
-                        <Icon icon="line-md:loading-twotone-loop" width="48" className="text-indigo-500" />
-                        <h3 className="font-dm-sans text-lg text-[#111]">Analyzing Speech Clarity...</h3>
-                    </div>
-                ) : liveMessages.filter(m => m.role === 'user' && m.analysis).length > 0 ? (
-                    (() => {
-                        const lastUserAnalysis = liveMessages.filter(m => m.role === 'user' && m.analysis).pop()!.analysis!;
-                        const isPerfect = lastUserAnalysis.incorrectWords.length === 0;
-                        
-                        return (
-                        <div className="flex flex-col gap-6">
-                            <div>
-                                <h3 className="font-dm-sans text-lg text-[#111] mb-2">Analyzing Speech Clarity</h3>
-                                {isPerfect ? (
-                                    <p className="text-neutral-500 font-sans text-sm">
-                                        That sounded great! Your pronunciation was clear and natural.
-                                    </p>
-                                ) : (
-                                    <p className="text-neutral-500 font-sans text-sm">
-                                        I've analyzed your recent phrase and focused on clarity, rhythm, and pronunciation.
-                                    </p>
-                                )}
-                            </div>
-                            
-                            {!isPerfect && (
-                                <>
-                                    <div>
-                                        <h4 className="text-neutral-400 text-xs uppercase font-bold mb-2 font-sans">Observation</h4>
-                                        <p className="text-sm text-[#111] font-sans">
-                                            Your pronunciation is understandable, but a few consonants were softened.
-                                        </p>
-                                    </div>
-                                    
-                                    <div>
-                                        <h4 className="text-neutral-400 text-xs uppercase font-bold mb-2 font-sans">Focus Words</h4>
-                                        <div className="flex flex-wrap gap-2">
-                                            {lastUserAnalysis.incorrectWords.map((word, i) => (
-                                                <span key={i} className="text-sm text-rose-500 font-medium font-sans bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100">
-                                                    {word}
-                                                </span>
-                                            ))}
-                                            {lastUserAnalysis.unclearWords?.map((word, i) => (
-                                                <span key={i+100} className="text-sm text-amber-500 font-medium font-sans bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100">
-                                                    {word}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                    
-                                    {lastUserAnalysis.tips?.length > 0 && (
-                                        <div>
-                                            <h4 className="text-neutral-400 text-xs uppercase font-bold mb-2 font-sans">Coaching Tips</h4>
-                                            <ul className="text-sm text-neutral-600 leading-relaxed font-sans space-y-1 pl-4 list-disc">
-                                                {lastUserAnalysis.tips.map((tip, i) => <li key={i}>{tip}</li>)}
-                                            </ul>
-                                        </div>
-                                    )}
-                                </>
-                            )}
-                        </div>
-                    )})()
-                ) : (
-                    <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
-                        <p className="text-neutral-500 font-sans text-sm max-w-[280px]">
-                            Connected to Live AI Coach
-                        </p>
-                    </div>
-                )}
-            </div>
-        ) : (
                     <AnimatePresence mode="wait">
                         {!analysis && !isAnalyzing ? (
                             <motion.div 
@@ -850,8 +824,8 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
                             </motion.div>
                         )}
                     </AnimatePresence>
-                )}
             </motion.div>
+            )}
         </div>
     );
 };

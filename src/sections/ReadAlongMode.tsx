@@ -35,6 +35,7 @@ const ReadAlongMode = ({ passage }: Props) => {
     const [sessionSaved, setSessionSaved] = useState(false);
     const [wordsPerMinute, setWordsPerMinute] = useState<number | null>(null);
     const [currentReadingWordIdx, setCurrentReadingWordIdx] = useState<number>(-1);
+    const [hasRecorded, setHasRecorded] = useState(false);
     const recordingStartRef = useRef<number>(0);
 
     const actualText = passage.id === 'custom' ? customText : passage.content;
@@ -49,6 +50,7 @@ const ReadAlongMode = ({ passage }: Props) => {
         setSessionSaved(false);
         setCustomText('');
         setWordsPerMinute(null);
+        setHasRecorded(false);
     }, [passage.id]);
 
     useEffect(() => {
@@ -57,90 +59,95 @@ const ReadAlongMode = ({ passage }: Props) => {
         }
     }, [transcript, interimTranscript]);
 
-    // Analyze on stop
     useEffect(() => {
-        if (!actualText || !transcript || isRecording) return;
-
-        const analyze = async () => {
-            setIsAnalyzing(true);
-            setApiError(null);
-            setRetryMsg(null);
-            setSessionSaved(false);
-            setShowScores(false);
-
-            try {
-                const result = await analyzePronunciation(actualText, transcript, accentStyle, (attempt) => {
-                    setRetryMsg(`AI coach is busy, retrying... (attempt ${attempt})`);
-                });
-                setRetryMsg(null);
-                setAnalysis(result);
-
-                // Only save real sessions (not the "too few words" result)
-                if (result.accuracyScore > 0) {
-                    const durationMs = Date.now() - recordingStartRef.current;
-                    const durationMin = Math.max(durationMs / 60000, 0.1);
-                    const spokenWords = transcript.split(/\s+/).length;
-                    const wpm = Math.round(spokenWords / durationMin);
-                    setWordsPerMinute(wpm);
-
-                    const fScore = Math.min(100, Math.round((spokenWords / actualText.split(/\s+/).length) * 100));
-                    const speechConsistency = Math.max(0, 100 - Math.abs(wpm - 130));
-                    const cScore = Math.min(100, Math.round(result.accuracyScore * 0.5 + fScore * 0.3 + speechConsistency * 0.2));
-
-                    addSession({
-                        passageId: passage.id,
-                        expectedText: actualText,
-                        spokenTranscript: transcript,
-                        pronunciationScore: result.accuracyScore,
-                        fluencyScore: fScore,
-                        confidenceScore: cScore,
-                        wordsPerMinute: wpm,
-                        pauseCount: Math.max(0, Math.round(durationMin * 2)),
-                        incorrectWords: result.incorrectWords,
-                        accentInfluence: result.accentInfluence,
-                        audioUrl: audioUrl || undefined,
-                    });
-                    setSessionSaved(true);
-                }
-
-                setTimeout(() => setShowScores(true), 100);
-
-                // Speak feedback using TTS
-                let feedbackText = '';
-                if (result.accuracyScore >= 95) {
-                    feedbackText = "Excellent pronunciation! You sounded very natural.";
-                } else if (result.incorrectWords.length > 0) {
-                    feedbackText = `Good effort! Let's practice the word ${result.incorrectWords[0]}.`;
-                } else if (result.accuracyScore >= 80) {
-                    feedbackText = "Great job! Your fluency is improving.";
-                } else {
-                    feedbackText = "Keep practicing, you're getting there.";
-                }
-
-                speakText({
-                    text: feedbackText,
-                    accentStyle,
-                    rate: autismMode ? 0.8 : 1.0
-                });
-
-            } catch (error: any) {
-                setRetryMsg(null);
-                setApiError(error.message || 'Failed connecting to backend.');
-            } finally {
-                setIsAnalyzing(false);
-            }
-        };
-
-        const timer = setTimeout(analyze, 300);
-        return () => clearTimeout(timer);
-    }, [transcript, isRecording]);
+        if (!isRecording && transcript) {
+            setHasRecorded(true);
+        }
+    }, [isRecording, transcript]);
 
     const handleStart = () => {
         stopSpeaking();
         setCurrentReadingWordIdx(-1);
         setSpokenTranscript('');
+        setAnalysis(null);
+        setSessionSaved(false);
+        setShowScores(false);
+        setHasRecorded(false);
         recordingStartRef.current = Date.now();
         startRecording();
+    };
+
+    const handleStop = () => {
+        stopRecording();
+    };
+
+    const handleAnalyze = async () => {
+        if (!actualText || !transcript || isRecording) return;
+
+        setIsAnalyzing(true);
+        setApiError(null);
+        setRetryMsg(null);
+        setSessionSaved(false);
+        setShowScores(false);
+
+        try {
+            const result = await analyzePronunciation(actualText, transcript, accentStyle, (attempt) => {
+                setRetryMsg(`AI coach is busy, retrying... (attempt ${attempt})`);
+            });
+            setRetryMsg(null);
+            setAnalysis(result);
+
+            if (result.accuracyScore > 0) {
+                const durationMs = Date.now() - recordingStartRef.current;
+                const durationMin = Math.max(durationMs / 60000, 0.1);
+                const spokenWords = transcript.split(/\s+/).length;
+                const wpm = Math.round(spokenWords / durationMin);
+                setWordsPerMinute(wpm);
+
+                const fScore = Math.min(100, Math.round((spokenWords / actualText.split(/\s+/).length) * 100));
+                const speechConsistency = Math.max(0, 100 - Math.abs(wpm - 130));
+                const cScore = Math.min(100, Math.round(result.accuracyScore * 0.5 + fScore * 0.3 + speechConsistency * 0.2));
+
+                addSession({
+                    passageId: passage.id,
+                    expectedText: actualText,
+                    spokenTranscript: transcript,
+                    pronunciationScore: result.accuracyScore,
+                    fluencyScore: fScore,
+                    confidenceScore: cScore,
+                    wordsPerMinute: wpm,
+                    pauseCount: Math.max(0, Math.round(durationMin * 2)),
+                    incorrectWords: result.incorrectWords,
+                    accentInfluence: result.accentInfluence,
+                    audioUrl: audioUrl || undefined,
+                });
+                setSessionSaved(true);
+            }
+
+            setTimeout(() => setShowScores(true), 100);
+
+            let feedbackText = '';
+            if (result.accuracyScore >= 95) {
+                feedbackText = "Excellent pronunciation! You sounded very natural.";
+            } else if (result.incorrectWords.length > 0) {
+                feedbackText = `Good effort! Let's practice the word ${result.incorrectWords[0]}.`;
+            } else if (result.accuracyScore >= 80) {
+                feedbackText = "Great job! Your fluency is improving.";
+            } else {
+                feedbackText = "Keep practicing, you're getting there.";
+            }
+
+            speakText({
+                text: feedbackText,
+                accentStyle,
+                rate: autismMode ? 0.8 : 1.0
+            });
+        } catch (error: any) {
+            setRetryMsg(null);
+            setApiError(error.message || 'Failed connecting to backend.');
+        } finally {
+            setIsAnalyzing(false);
+        }
     };
 
     const playCorrect = useCallback(() => {
@@ -339,21 +346,32 @@ const ReadAlongMode = ({ passage }: Props) => {
                             </button>
                         </div>
 
-                        <button
-                            onMouseDown={handleStart}
-                            onMouseUp={stopRecording}
-                            onMouseLeave={isRecording ? stopRecording : undefined}
-                            onTouchStart={(e) => { e.preventDefault(); handleStart(); }}
-                            onTouchEnd={(e) => { e.preventDefault(); stopRecording(); }}
-                            className={`w-16 h-16 flex items-center justify-center rounded-full text-white shadow-lg transition-all duration-200 touch-none select-none ${isRecording
-                                ? 'bg-rose-500 mic-recording scale-110'
-                                : 'bg-[#111] hover:scale-105 hover:shadow-xl'
-                                }`}
-                            disabled={isAnalyzing || !isSupported || !actualText}
-                            aria-label="Hold to speak"
-                        >
-                            <Icon icon={isRecording ? "solar:microphone-2-bold" : "solar:microphone-2-linear"} width="28" />
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={handleStart}
+                                className="w-12 h-12 flex items-center justify-center rounded-full bg-[#111] text-white hover:scale-105 hover:shadow-xl transition-all disabled:opacity-50"
+                                disabled={isAnalyzing || !isSupported || !actualText || isRecording}
+                                title="Start recording"
+                            >
+                                <Icon icon="solar:microphone-2-linear" width="22" />
+                            </button>
+                            <button
+                                onClick={handleStop}
+                                className="w-12 h-12 flex items-center justify-center rounded-full bg-rose-50 text-rose-600 hover:bg-rose-100 transition-all disabled:opacity-50"
+                                disabled={!isRecording}
+                                title="Stop recording"
+                            >
+                                <Icon icon="solar:stop-circle-linear" width="22" />
+                            </button>
+                            <button
+                                onClick={handleAnalyze}
+                                className="w-12 h-12 flex items-center justify-center rounded-full bg-emerald-50 text-emerald-600 hover:bg-emerald-100 transition-all disabled:opacity-50"
+                                disabled={!hasRecorded || isRecording || isAnalyzing}
+                                title="Analyze recording"
+                            >
+                                <Icon icon="solar:chart-2-linear" width="22" />
+                            </button>
+                        </div>
 
                         {audioUrl && (
                             <button
@@ -382,11 +400,14 @@ const ReadAlongMode = ({ passage }: Props) => {
                         {sessionSaved && (
                             <span className="text-emerald-500 flex items-center gap-1 justify-center">
                                 <Icon icon="solar:check-circle-linear" width="16" />
-                                {autismMode ? 'Great job! Try again when you are ready.' : 'Session saved! Hold mic to try again.'}
+                                {autismMode ? 'Great job! Try again when you are ready.' : 'Session saved! Click start to try again.'}
                             </span>
                         )}
-                        {!isRecording && !isAnalyzing && !analysis && !speechError && !apiError && !retryMsg && (
-                            <span className="text-neutral-400">{autismMode ? 'Press and hold the microphone. Read slowly and clearly.' : 'Hold microphone to read the passage aloud'}</span>
+                        {!isRecording && !isAnalyzing && !analysis && !speechError && !apiError && !retryMsg && !hasRecorded && (
+                            <span className="text-neutral-400">{autismMode ? 'Tap start when you are ready. Read slowly and clearly.' : 'Tap start, then stop when you finish reading.'}</span>
+                        )}
+                        {!isRecording && !isAnalyzing && !analysis && !speechError && !apiError && !retryMsg && hasRecorded && (
+                            <span className="text-indigo-500">Recording complete. Tap analyze for feedback.</span>
                         )}
                     </div>
                 </div>
@@ -560,25 +581,25 @@ const ReadAlongMode = ({ passage }: Props) => {
                                 <div className="flex justify-center gap-4">
                                     <button
                                         onClick={() => { stopSpeaking(); const a = new Audio(audioUrl); a.play().catch(console.error); }}
-                                        className="flex-1 flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+                                        className="w-16 h-16 flex items-center justify-center bg-white border border-neutral-200 rounded-2xl text-neutral-700 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm"
+                                        title="Replay yours"
                                     >
-                                        <Icon icon="solar:play-circle-linear" width="18" /> Replay Yours
+                                        <Icon icon="solar:play-circle-linear" width="22" />
                                     </button>
-                                    <div className="flex-1 flex gap-2">
-                                        <button
-                                            onClick={playCorrect}
-                                            className="flex-[3] flex items-center justify-center gap-2 bg-white border border-neutral-200 py-2.5 rounded-xl text-sm font-sans font-medium hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
-                                        >
-                                            <Icon icon="solar:soundwave-circle-linear" width="18" /> Hear AI Coach
-                                        </button>
-                                        <button
-                                            onClick={stopSpeaking}
-                                            className="flex-1 flex items-center justify-center bg-white border border-neutral-200 py-2.5 rounded-xl text-neutral-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm"
-                                            title="Stop Audio"
-                                        >
-                                            <Icon icon="solar:stop-circle-linear" width="18" />
-                                        </button>
-                                    </div>
+                                    <button
+                                        onClick={playCorrect}
+                                        className="w-16 h-16 flex items-center justify-center bg-white border border-neutral-200 rounded-2xl text-neutral-700 hover:bg-emerald-50 hover:text-emerald-700 hover:border-emerald-200 transition-all shadow-sm"
+                                        title="Hear AI coach"
+                                    >
+                                        <Icon icon="solar:soundwave-circle-linear" width="22" />
+                                    </button>
+                                    <button
+                                        onClick={stopSpeaking}
+                                        className="w-16 h-16 flex items-center justify-center bg-white border border-neutral-200 rounded-2xl text-neutral-500 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm"
+                                        title="Stop audio"
+                                    >
+                                        <Icon icon="solar:stop-circle-linear" width="22" />
+                                    </button>
                                 </div>
                             </div>
                         )}

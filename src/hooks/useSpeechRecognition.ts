@@ -22,7 +22,13 @@ declare global {
 // Maximum allowed recording duration (2 minutes)
 const MAX_RECORDING_MS = 120_000;
 
-export const useSpeechRecognition = () => {
+interface SpeechRecognitionOptions {
+    continuous?: boolean;
+    interimResults?: boolean;
+    lang?: string;
+}
+
+export const useSpeechRecognition = (options: SpeechRecognitionOptions = {}) => {
     const [isRecording, setIsRecording] = useState(false);
     const [transcript, setTranscript] = useState('');
     const [interimTranscript, setInterimTranscript] = useState('');
@@ -61,6 +67,10 @@ export const useSpeechRecognition = () => {
         };
     }, []);
 
+    const continuous = options.continuous ?? true;
+    const interimResults = options.interimResults ?? true;
+    const lang = options.lang ?? 'en-US';
+
     const initRecognition = useCallback(() => {
         if (!isSupported) {
             setError('Speech recognition is not supported in this browser.');
@@ -72,9 +82,9 @@ export const useSpeechRecognition = () => {
             const recognition = new SpeechRecognitionAPI();
 
             // Configure based on requirements
-            recognition.continuous = true;
-            recognition.interimResults = true;
-            recognition.lang = 'en-US';
+            recognition.continuous = continuous;
+            recognition.interimResults = interimResults;
+            recognition.lang = lang;
 
             recognition.onresult = (event: SpeechRecognitionEvent) => {
                 let finalT = '';
@@ -109,10 +119,14 @@ export const useSpeechRecognition = () => {
             };
 
             recognitionRef.current = recognition;
+        } else {
+            recognitionRef.current.continuous = continuous;
+            recognitionRef.current.interimResults = interimResults;
+            recognitionRef.current.lang = lang;
         }
 
         return recognitionRef.current;
-    }, [isSupported]);
+    }, [continuous, interimResults, isSupported, lang]);
 
     const startRecording = useCallback(async () => {
         setError(null);

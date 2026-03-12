@@ -6,7 +6,7 @@ import type { Passage } from '../data/passages';
 import ReadAlongMode from '../sections/ReadAlongMode';
 import FreeSpeakMode from '../sections/FreeSpeakMode';
 
-type PracticeTab = 'read-along' | 'free-speak' | 'speech-analysis' | 'live-coach';
+type PracticeTab = 'read-along' | 'live-coach';
 
 const Practice = () => {
     const [tab, setTab] = useState<PracticeTab>('read-along');
@@ -23,36 +23,18 @@ const Practice = () => {
     };
 
     return (
-        <div className="pt-24 min-h-screen bg-gray-50 pb-20">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="bg-[#FAFAFA] min-h-screen pt-36 pb-20">
+            <div className="max-w-[90rem] mx-auto px-6 md:px-12">
                 
-                {/* Header Metrics */}
                 <div className="mb-8 border-b border-gray-200 pb-6 flex items-end justify-between">
                     <div>
                         <div className="flex items-center gap-3 mb-2">
                             <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center">
                                 <Icon icon="solar:chart-square-linear" width="22" className="text-indigo-600" />
                             </div>
-                            <h1 className="text-3xl sm:text-4xl font-dm-sans text-[#111] tracking-tight">Practice Session</h1>
+                            <h1 className="text-4xl font-dm-sans font-semibold text-[#111] tracking-tight">Practice Session</h1>
                         </div>
                         <p className="text-neutral-500 font-sans ml-[52px]">Select a practice method and improve your speaking.</p>
-                    </div>
-                    
-                    <div className="hidden sm:flex items-center gap-6 bg-white border border-gray-200 shadow-sm rounded-xl px-6 py-3">
-                        <div className="flex flex-col">
-                            <span className="text-xs text-neutral-400 font-bold uppercase tracking-wider mb-1">Accuracy</span>
-                            <span className="text-[#111] font-semibold text-lg">82%</span>
-                        </div>
-                        <div className="w-px h-8 bg-gray-200"></div>
-                        <div className="flex flex-col">
-                            <span className="text-xs text-neutral-400 font-bold uppercase tracking-wider mb-1">Fluency</span>
-                            <span className="text-[#111] font-semibold text-lg">76%</span>
-                        </div>
-                        <div className="w-px h-8 bg-gray-200"></div>
-                        <div className="flex flex-col">
-                            <span className="text-xs text-neutral-400 font-bold uppercase tracking-wider mb-1">Words/min</span>
-                            <span className="text-[#111] font-semibold text-lg">118</span>
-                        </div>
                     </div>
                 </div>
 
@@ -68,8 +50,6 @@ const Practice = () => {
                         <ul className="space-y-1.5 flex flex-row lg:flex-col overflow-x-auto lg:overflow-visible pb-2 lg:pb-0">
                             {[
                                 { id: 'read-along', label: 'Read Along', icon: 'solar:book-2-linear' },
-                                { id: 'free-speak', label: 'Free Speak', icon: 'solar:microphone-2-linear' },
-                                { id: 'speech-analysis', label: 'Speech Analysis', icon: 'solar:waveform-linear' },
                                 { id: 'live-coach', label: 'Live AI Coach', icon: 'solar:stars-line-duotone' },
                             ].map((item) => (
                                 <li key={item.id}>
@@ -80,7 +60,7 @@ const Practice = () => {
                                                 ? (item.id === 'live-coach' 
                                                     ? 'bg-indigo-50 border-l-indigo-500 text-indigo-700 font-bold' 
                                                     : 'bg-indigo-50/70 border-l-indigo-600 text-indigo-700 font-bold') 
-                                                : 'bg-transparent border-l-transparent hover:border-l-indigo-200 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 font-semibold'
+                                                : 'bg-transparent border-l-transparent hover:border-l-indigo-200 text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 font-bold'
                                         }`}
                                     >
                                         <Icon icon={item.icon} width="20" />
@@ -215,10 +195,10 @@ const Practice = () => {
                             </div>
                         )}
 
-                        {/* Free Speak Modes */}
-                        {(tab === 'free-speak' || tab === 'speech-analysis' || tab === 'live-coach') && (
+                        {/* Live AI Coach */}
+                        {tab === 'live-coach' && (
                             <div className="page-enter">
-                                <FreeSpeakMode initialMode={tab === 'live-coach' ? 'live' : 'standard'} hideToggle={true} titleMode={tab} />
+                                <FreeSpeakMode initialMode="live" hideToggle={true} titleMode="live-coach" />
                             </div>
                         )}
                             </motion.div>

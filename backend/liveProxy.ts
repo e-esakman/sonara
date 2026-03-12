@@ -13,17 +13,13 @@ When users speak English sentences:
 
 Keep responses short and conversational.`;
 
-// Maximum allowed size (bytes) for a single WebSocket message from the client
-const MAX_WS_MESSAGE_BYTES = 512 * 1024; // 512 KB
-
 export function setupLiveProxy(server: Server) {
     const wss = new WebSocketServer({ server, path: '/live-ws' });
 
     wss.on('connection', async (clientWs: WebSocket) => {
-        // Prefer GEMINI_LIVEVOICE_KEY for live voice, fallback to GEMINI_API_KEY for backwards compatibility.
         const apiKey = process.env.GEMINI_LIVEVOICE_KEY || process.env.GEMINI_API_KEY;
         if (!apiKey) {
-            clientWs.close(1011, 'Server misconfigured: missing GEMINI_LIVEVOICE_KEY or GEMINI_API_KEY');
+            clientWs.close(1011, 'Server misconfigured: missing API key');
             return;
         }
 
@@ -72,14 +68,6 @@ export function setupLiveProxy(server: Server) {
 
         clientWs.on('message', (data: WebSocket.RawData) => {
             if (!geminiSession) return;
-
-            // Reject oversized messages to prevent DoS
-            const byteLength = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(data.toString());
-            if (byteLength > MAX_WS_MESSAGE_BYTES) {
-                clientWs.close(1009, 'Message too large');
-                return;
-            }
-
             try {
                 const msg = JSON.parse(data.toString()) as {
                     type: string;

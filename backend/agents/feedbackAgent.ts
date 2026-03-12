@@ -3,7 +3,6 @@ import { callGeminiWithRetry } from './geminiRetry.ts';
 
 let _aiFeedbackInstance: GoogleGenAI | null = null;
 let _aiPracticeInstance: GoogleGenAI | null = null;
-let _aiFallbackInstance: GoogleGenAI | null = null;
 
 function getAi(isLibraryPractice: boolean) {
     if (isLibraryPractice && process.env.GEMINI_API_KEY) {
@@ -14,10 +13,7 @@ function getAi(isLibraryPractice: boolean) {
         return _aiFeedbackInstance;
     }
     const fallbackKey = process.env.GEMINI_FEEDBACK_KEY || process.env.GEMINI_API_KEY;
-    if (fallbackKey) {
-        if (!_aiFallbackInstance) _aiFallbackInstance = new GoogleGenAI({ apiKey: fallbackKey });
-        return _aiFallbackInstance;
-    }
+    if (fallbackKey) return new GoogleGenAI({ apiKey: fallbackKey });
     return null;
 }
 
@@ -31,7 +27,7 @@ export interface FeedbackResult {
     missing_words?: string[];
     extra_words?: string[];
     coaching_tips?: string[];
-    coach_message?: string | string[];
+    coach_message?: string[];
     accent_detection?: string;
 
     // standard properties
@@ -39,6 +35,8 @@ export interface FeedbackResult {
     tips: string[];
     phoneticBreakdown: { [word: string]: string };
     accentInfluence?: string;
+    coachMessage?: string;
+    speakCorrectWords?: string[];
 }
 
 export async function generateFeedback(
@@ -140,22 +138,97 @@ Rules:
         }
 
         const parsed = JSON.parse(jsonStr);
+        const normalizedCoach = buildCoachMessage(parsed);
+        const speakCorrectWords = extractSpeakCorrectWords(parsed);
+
         return {
             ...parsed,
             accentInfluence: parsed.accent_detection || 'Unknown',
             suggestions: parsed.coaching_tips || parsed.suggestions || [],
-            tips: parsed.tips || (parsed.coach_message
-                ? (Array.isArray(parsed.coach_message) ? parsed.coach_message : [parsed.coach_message]).filter(Boolean)
-                : []),
-            phoneticBreakdown: parsed.phoneticBreakdown || {}
+            tips: parsed.tips || [],
+            phoneticBreakdown: parsed.phoneticBreakdown || {},
+            coachMessage: normalizedCoach,
+            speakCorrectWords
         } as FeedbackResult;
     } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
         console.error("Gemini API error in Feedback Agent:", error);
         return {
             phoneticBreakdown: {},
-            tips: ["Error communicating with AI. Please try again."],
+            tips: [`Error communicating with AI: ${message}`],
             suggestions: [],
-            accentInfluence: "Unknown"
+            accentInfluence: "Unknown",
+            coachMessage: 'I could not prepare pronunciation coaching right now.'
         };
     }
+}
+
+function extractSpeakCorrectWords(parsed: any): string[] {
+    const explicit = Array.isArray(parsed?.speakCorrectWords) ? parsed.speakCorrectWords : [];
+    const explicitStrings = explicit.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
+
+    if (explicitStrings.length > 0) {
+        return explicitStrings;
+    }
+
+    const wordsFromProblems = Array.isArray(parsed?.problem_words)
+        ? parsed.problem_words.map((item: any) => item?.word).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+
+    const wordsFromAnalysis = Array.isArray(parsed?.word_analysis)
+        ? parsed.word_analysis
+            .filter((item: any) => typeof item?.status === 'string' && item.status.toLowerCase() === 'incorrect')
+            .map((item: any) => item?.word)
+            .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+        : [];
+
+    return [...new Set([...wordsFromProblems, ...wordsFromAnalysis])];
+}
+
+function buildCoachMessage(parsed: any): string {
+    const problemWords = Array.isArray(parsed?.problem_words) ? parsed.problem_words : [];
+    const phoneticBreakdown = parsed?.phoneticBreakdown || {};
+
+    const blocks = problemWords.slice(0, 3).map((item: any) => {
+        const word = typeof item?.word === 'string' ? item.word : '';
+        if (!word) {
+            return '';
+        }
+
+        const phonetic = typeof phoneticBreakdown[word] === 'string' && phoneticBreakdown[word].trim()
+            ? phoneticBreakdown[word].trim()
+            : 'Listen and repeat';
+        const tip = typeof item?.tip === 'string' && item.tip.trim()
+            ? item.tip.trim()
+            : 'Listen and repeat this word slowly.';
+
+        return [
+            `Word needing improvement: *${word}*`,
+            'Correct pronunciation:',
+            phonetic.startsWith('/') ? phonetic : `/${phonetic}/`,
+            'Breakdown:',
+            phonetic,
+            'Tip:',
+            tip,
+            `SpeakCorrectWord: ${word}`
+        ].join('\n');
+    }).filter(Boolean);
+
+    if (blocks.length > 0) {
+        return blocks.join('\n\n');
+    }
+
+    const rawCoachMessage = Array.isArray(parsed?.coach_message)
+        ? parsed.coach_message.filter((item: unknown): item is string => typeof item === 'string').join(' ')
+        : typeof parsed?.coach_message === 'string'
+            ? parsed.coach_message
+            : '';
+
+    const cleaned = rawCoachMessage
+        .replace(/\*\*[^*]+\*\*/g, '')
+        .replace(/Analyzing[^.!\n]*[.!\n]?/gi, '')
+        .replace(/Focusing on[^.!\n]*[.!\n]?/gi, '')
+        .trim();
+
+    return cleaned || 'Your pronunciation was mostly clear. Repeat the sentence once more.';
 }
