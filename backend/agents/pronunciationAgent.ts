@@ -3,6 +3,7 @@ export interface PronunciationAnalysisResult {
     incorrectWords: string[];
     unclearWords: string[];
     unreadWords: string[];
+    wordAnalysis: { word: string; status: 'correct' | 'incorrect' | 'unclear' | 'unread'; score: number }[];
 }
 
 export function analyzePronunciationLocal(expectedText: string, transcriptTokens: string[]): PronunciationAnalysisResult {
@@ -12,6 +13,7 @@ export function analyzePronunciationLocal(expectedText: string, transcriptTokens
     const incorrectWords: string[] = [];
     const unclearWords: string[] = [];
     const unreadWords: string[] = [];
+    const wordAnalysis: { word: string; status: 'correct' | 'incorrect' | 'unclear' | 'unread'; score: number }[] = [];
 
     // Incrementally find how far the user read
     let expectedIndex = 0;
@@ -42,10 +44,6 @@ export function analyzePronunciationLocal(expectedText: string, transcriptTokens
     const evaluatedExpectedWords = expectedWords.slice(0, maxEvaluationIndex);
     const ignoredExpectedWords = expectedWords.slice(maxEvaluationIndex);
 
-    for (const w of ignoredExpectedWords) {
-        unreadWords.push(w);
-    }
-
     let mistakes = 0;
     const spokenWordsSet = new Set(spokenWords);
 
@@ -53,17 +51,30 @@ export function analyzePronunciationLocal(expectedText: string, transcriptTokens
         if (word.length < 2) continue;
 
         const wasSpoken = spokenWordsSet.has(word);
+        let status: 'correct' | 'incorrect' | 'unclear' = 'correct';
+        let score = 0.92;
         
         if (!wasSpoken) {
             const wasFuzzy = spokenWords.some(sw => sw.length >= 2 && (word.includes(sw) || sw.includes(word)));
             if (!wasFuzzy) {
                 unclearWords.push(word);
                 mistakes += 1;
+                status = 'unclear';
+                score = 0.72;
             } else {
                 incorrectWords.push(word);
                 mistakes += 0.5;
+                status = 'incorrect';
+                score = 0.48;
             }
         }
+
+        wordAnalysis.push({ word, status, score });
+    }
+
+    for (const w of ignoredExpectedWords) {
+        unreadWords.push(w);
+        wordAnalysis.push({ word: w, status: 'unread', score: 0 });
     }
 
     const accuracyScore = evaluatedExpectedWords.length > 0
@@ -74,6 +85,7 @@ export function analyzePronunciationLocal(expectedText: string, transcriptTokens
         accuracyScore: isNaN(accuracyScore) ? 100 : accuracyScore,
         incorrectWords: [...new Set(incorrectWords)],
         unclearWords: [...new Set(unclearWords)],
-        unreadWords: [...new Set(unreadWords)]
+        unreadWords: [...new Set(unreadWords)],
+        wordAnalysis
     };
 }

@@ -115,12 +115,22 @@ const topicsText: Record<GrammarTopic, { title: string, rule: string, examples: 
 interface GrammarResult {
     correction: string;
     explanation: string;
+    rule: string;
+    structureChart: Array<Record<string, string>>;
+    exampleSentence: string;
+    exampleBreakdown: string[];
+    quickTip: string;
     tips: string[];
     suggestions: string[];
     accuracy: string;
     variety: string;
     bandEstimate: string;
 }
+
+const getChartColumns = (rows: Array<Record<string, string>>) => {
+    const firstRow = rows[0];
+    return firstRow ? Object.keys(firstRow) : [];
+};
 
 const Grammar = () => {
     const [activeTopic, setActiveTopic] = useState<GrammarTopic>('tenses');
@@ -159,8 +169,8 @@ const Grammar = () => {
     };
 
     return (
-        <div className="pt-24 min-h-screen bg-gray-50 pb-20">
-            <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div className="bg-[#FAFAFA] min-h-screen pt-36 pb-20">
+            <div className="max-w-[90rem] mx-auto px-6 md:px-12">
                 
                 {/* Header */}
                 <div className="mb-8 border-b border-gray-200 pb-6 flex items-end justify-between">
@@ -169,7 +179,7 @@ const Grammar = () => {
                             <div className="w-10 h-10 rounded-2xl bg-indigo-50 flex items-center justify-center">
                                 <Icon icon="solar:pen-new-square-linear" width="22" className="text-indigo-600" />
                             </div>
-                            <h1 className="text-3xl sm:text-4xl font-dm-sans text-[#111] tracking-tight">Grammar Coach</h1>
+                            <h1 className="text-4xl font-dm-sans font-semibold text-[#111] tracking-tight">Grammar Coach</h1>
                         </div>
                         <p className="text-neutral-500 font-sans ml-[52px]">Master your grammar rules with interactive AI feedback.</p>
                     </div>
@@ -207,7 +217,7 @@ const Grammar = () => {
                                         className={`w-full whitespace-nowrap text-left px-4 py-3.5 rounded-xl border-l-[3px] font-sans text-sm transition-all duration-200 flex items-center gap-3 ${
                                             activeTopic === item.id 
                                                 ? 'bg-indigo-50/70 border-l-indigo-600 text-indigo-700 font-bold' 
-                                                : 'bg-transparent border-l-transparent hover:border-l-indigo-200 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 font-semibold'
+                                                : 'bg-transparent border-l-transparent hover:border-l-indigo-200 text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 font-bold'
                                         }`}
                                     >
                                         <Icon icon={item.icon} width="20" />
@@ -378,11 +388,78 @@ const Grammar = () => {
                                     </div>
 
                                     {/* Explanation */}
+                                    {result?.rule && (
+                                        <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
+                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Rule</h4>
+                                            <p className="text-[15px] font-sans text-neutral-700 leading-relaxed bg-neutral-50 p-4 rounded-2xl border border-neutral-100">
+                                                {result.rule}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {result?.structureChart && result.structureChart.length > 0 && (
+                                        <div className="flex flex-col gap-3 border-b border-neutral-100/80 pb-6">
+                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Structure Chart</h4>
+                                            <div className="overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50">
+                                                <div
+                                                    className="grid gap-px bg-neutral-200 text-sm font-sans"
+                                                    style={{ gridTemplateColumns: `repeat(${getChartColumns(result.structureChart).length}, minmax(0, 1fr))` }}
+                                                >
+                                                    {getChartColumns(result.structureChart).map((column) => (
+                                                        <div key={column} className="bg-neutral-100 px-3 py-2 font-semibold text-neutral-500">
+                                                            {column}
+                                                        </div>
+                                                    ))}
+                                                    {result.structureChart.flatMap((row, rowIndex) =>
+                                                        getChartColumns(result.structureChart).map((column) => (
+                                                            <div key={`${rowIndex}-${column}`} className="bg-white px-3 py-3 text-neutral-700">
+                                                                {row[column] || '—'}
+                                                            </div>
+                                                        ))
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {(result?.exampleSentence || (result?.exampleBreakdown && result.exampleBreakdown.length > 0)) && (
+                                        <div className="flex flex-col gap-3 border-b border-neutral-100/80 pb-6">
+                                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Example Breakdown</h4>
+                                            {result.exampleSentence && (
+                                                <div className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
+                                                    <span className="text-[11px] font-bold text-indigo-500 uppercase tracking-wide block mb-1">Sentence</span>
+                                                    <p className="text-[16px] font-dm-sans text-[#111]">{result.exampleSentence}</p>
+                                                </div>
+                                            )}
+                                            {result.exampleBreakdown && result.exampleBreakdown.length > 0 && (
+                                                <ul className="space-y-2">
+                                                    {result.exampleBreakdown.map((item, index) => (
+                                                        <li key={index} className="flex gap-2 items-start rounded-xl border border-neutral-100 bg-neutral-50 px-3 py-2.5 text-[15px] text-neutral-700">
+                                                            <Icon icon="solar:sidebar-code-linear" className="mt-0.5 shrink-0 text-neutral-400" width="16" />
+                                                            <span>{item}</span>
+                                                        </li>
+                                                    ))}
+                                                </ul>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {result?.quickTip && (
+                                        <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
+                                            <h4 className="text-amber-700 text-xs font-medium uppercase tracking-tight flex items-center gap-1.5 font-sans mb-1">
+                                                <Icon icon="solar:lightbulb-linear" width="16" /> Quick Tip
+                                            </h4>
+                                            <p className="text-[15px] text-amber-900 leading-relaxed font-sans rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3">
+                                                {result.quickTip}
+                                            </p>
+                                        </div>
+                                    )}
+
                                     {result?.explanation && (
                                         <div className="flex flex-col gap-2 border-b border-neutral-100/80 pb-6">
                                             <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider font-sans">Explanation</h4>
                                             <p className="text-[15px] font-sans text-neutral-600 leading-relaxed bg-neutral-50 p-4 rounded-2xl border border-neutral-100">
-                                                {result?.explanation}
+                                                {result.explanation}
                                             </p>
                                         </div>
                                     )}
