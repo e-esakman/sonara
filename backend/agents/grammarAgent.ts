@@ -14,6 +14,9 @@ function getAi() {
 export interface GrammarResult {
     correction: string;
     explanation: string;
+    diagram: string;
+    voiceScript: string;
+    lessonSteps: Array<{ title: string; content: string }>;
     rule: string;
     structureChart: Array<Record<string, string>>;
     exampleSentence: string;
@@ -32,6 +35,14 @@ export async function checkGrammar(text: string): Promise<GrammarResult> {
         return {
             correction: "Cannot check grammar currently.",
             explanation: "No AI key provided.",
+            diagram: `Original -> ${text}\nCorrection -> ${text}`,
+            voiceScript: "I can't explain this sentence right now because the grammar coach is unavailable.",
+            lessonSteps: [
+                { title: "Original Sentence", content: text },
+                { title: "Correct Sentence", content: text },
+                { title: "Grammar Rule", content: "Try again when the grammar coach is available." },
+                { title: "Example", content: text }
+            ],
             rule: "Grammar coach is unavailable right now.",
             structureChart: [],
             exampleSentence: text,
@@ -59,6 +70,14 @@ Always return a single JSON object with this structure:
 {
   "correction": "The corrected sentence. If the sentence is already correct, repeat it or say 'Your sentence is correct.'",
   "explanation": "A short visual-style explanation summary in 1-2 sentences.",
+  "diagram": "A short text diagram showing the change or pattern.",
+  "voiceScript": "A short natural narration script that sounds like a teacher explaining the correction.",
+  "lessonSteps": [
+    { "title": "Original Sentence", "content": "User sentence here" },
+    { "title": "Correct Sentence", "content": "Corrected sentence here" },
+    { "title": "Grammar Rule", "content": "Short beginner-friendly rule" },
+    { "title": "Example", "content": "One or more simple examples" }
+  ],
   "rule": "A short and simple grammar rule.",
   "structureChart": [
     { "Subject": "I", "Helping Verb": "am", "Main Verb": "going" },
@@ -83,6 +102,8 @@ Rules:
 - Do NOT write long paragraphs.
 - Keep the response concise, visual, and easy for language learners.
 - Prefer simple labels like Subject, Helping Verb, Main Verb, Time Word, Object, Connector.
+- "voiceScript" should be 2-3 natural sentences and easy to speak aloud.
+- "lessonSteps" should contain 3-5 short steps that feel like a mini lesson.
 - "structureChart" must be a usable table for the frontend.
 - "exampleBreakdown" must explain how each word or chunk functions.
 - "quickTip" must be one short learning tip.
@@ -107,6 +128,16 @@ Rules:
         return {
             correction: jsonResponse.correction || text,
             explanation: jsonResponse.explanation || "No explanation provided.",
+            diagram: jsonResponse.diagram || `Original -> ${text}\nCorrection -> ${jsonResponse.correction || text}`,
+            voiceScript: jsonResponse.voiceScript || `Let's fix this sentence. ${jsonResponse.rule || "Review the sentence pattern and keep the structure consistent."}`,
+            lessonSteps: Array.isArray(jsonResponse.lessonSteps) && jsonResponse.lessonSteps.length > 0
+                ? jsonResponse.lessonSteps
+                : [
+                    { title: "Original Sentence", content: text },
+                    { title: "Correct Sentence", content: jsonResponse.correction || text },
+                    { title: "Grammar Rule", content: jsonResponse.rule || "Review the sentence pattern and keep the structure consistent." },
+                    { title: "Example", content: jsonResponse.exampleSentence || jsonResponse.correction || text }
+                ],
             rule: jsonResponse.rule || "Review the sentence pattern and keep the structure consistent.",
             structureChart: Array.isArray(jsonResponse.structureChart) ? jsonResponse.structureChart : [],
             exampleSentence: jsonResponse.exampleSentence || jsonResponse.correction || text,
@@ -123,6 +154,14 @@ Rules:
         return {
             correction: "Error occurred while checking grammar.",
             explanation: "The AI agent failed to process the request.",
+            diagram: `Original -> ${text}\nCorrection -> Error occurred while checking grammar.`,
+            voiceScript: "I couldn't build the spoken lesson this time. Please try again.",
+            lessonSteps: [
+                { title: "Original Sentence", content: text },
+                { title: "Correct Sentence", content: "Error occurred while checking grammar." },
+                { title: "Grammar Rule", content: "The grammar coach could not build the rule right now." },
+                { title: "Example", content: "Please try again." }
+            ],
             rule: "The grammar coach could not build the rule right now.",
             structureChart: [],
             exampleSentence: text,

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Icon } from '@iconify/react';
 import { motion, AnimatePresence } from 'framer-motion';
+import LessonPlayer, { type LessonStep } from '../components/LessonPlayer';
 
 type GrammarTopic =
     | 'tenses'
@@ -115,6 +116,9 @@ const topicsText: Record<GrammarTopic, { title: string; rule: string; examples: 
 interface GrammarResult {
     correction: string;
     explanation: string;
+    diagram: string;
+    voiceScript: string;
+    lessonSteps: LessonStep[];
     rule: string;
     structureChart: Array<Record<string, string>>;
     exampleSentence: string;
@@ -132,12 +136,91 @@ const getChartColumns = (rows: Array<Record<string, string>>) => {
     return firstRow ? Object.keys(firstRow) : [];
 };
 
+const normalizeToken = (token: string) => token.replace(/[^\p{L}\p{N}'-]/gu, '').toLowerCase();
+
+const buildSentenceDiff = (original: string, corrected: string) => {
+    const originalTokens = original.trim().split(/\s+/).filter(Boolean);
+    const correctedTokens = corrected.trim().split(/\s+/).filter(Boolean);
+
+    let prefixLength = 0;
+    while (
+        prefixLength < originalTokens.length &&
+        prefixLength < correctedTokens.length &&
+        normalizeToken(originalTokens[prefixLength]) === normalizeToken(correctedTokens[prefixLength])
+    ) {
+        prefixLength += 1;
+    }
+
+    let originalSuffixIndex = originalTokens.length - 1;
+    let correctedSuffixIndex = correctedTokens.length - 1;
+    while (
+        originalSuffixIndex >= prefixLength &&
+        correctedSuffixIndex >= prefixLength &&
+        normalizeToken(originalTokens[originalSuffixIndex]) === normalizeToken(correctedTokens[correctedSuffixIndex])
+    ) {
+        originalSuffixIndex -= 1;
+        correctedSuffixIndex -= 1;
+    }
+
+    const originalChanged = originalTokens.slice(prefixLength, originalSuffixIndex + 1).join(' ');
+    const correctedChanged = correctedTokens.slice(prefixLength, correctedSuffixIndex + 1).join(' ');
+
+    return {
+        hasChange: Boolean(originalChanged || correctedChanged),
+        originalBefore: originalTokens.slice(0, prefixLength).join(' '),
+        originalChanged,
+        originalAfter: originalTokens.slice(originalSuffixIndex + 1).join(' '),
+        correctedBefore: correctedTokens.slice(0, prefixLength).join(' '),
+        correctedChanged,
+        correctedAfter: correctedTokens.slice(correctedSuffixIndex + 1).join(' ')
+    };
+};
+
+const SentenceLine = ({
+    before,
+    changed,
+    after,
+    changeClassName
+}: {
+    before: string;
+    changed: string;
+    after: string;
+    changeClassName?: string;
+}) => {
+    const parts = [before, changed, after].filter(Boolean);
+
+    if (parts.length === 0) {
+        return <span className="text-[#111]">—</span>;
+    }
+
+    return (
+        <span className="leading-relaxed">
+            {before && <span>{before}</span>}
+            {before && changed && <span> </span>}
+            {changed && (
+                <motion.span
+                    initial={{ opacity: 0, y: 10, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    transition={{ duration: 0.35, ease: 'easeOut' }}
+                    className={changeClassName}
+                >
+                    {changed}
+                </motion.span>
+            )}
+            {(before || changed) && after && <span> </span>}
+            {after && <span>{after}</span>}
+        </span>
+    );
+};
+
 const Grammar = () => {
     const [activeTopic, setActiveTopic] = useState<GrammarTopic>('tenses');
     const [inputText, setInputText] = useState('');
+    const [analyzedText, setAnalyzedText] = useState('');
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [result, setResult] = useState<GrammarResult | null>(null);
     const [apiError, setApiError] = useState<string | null>(null);
+    const [isLessonOpen, setIsLessonOpen] = useState(false);
 
     const activeLesson = topicsText[activeTopic];
     const topicItems = [
@@ -158,6 +241,8 @@ const Grammar = () => {
         setIsAnalyzing(true);
         setResult(null);
         setApiError(null);
+        setIsLessonOpen(false);
+        setAnalyzedText(inputText.trim());
 
         try {
             const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -181,9 +266,10 @@ const Grammar = () => {
     };
 
     return (
-        <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(212,235,248,0.35),_transparent_26%),linear-gradient(180deg,_#fbfbfa_0%,_#f6f2ec_100%)] pt-36 pb-20">
-            <div className="mx-auto max-w-[90rem] px-6 md:px-12">
-                <div className="grid grid-cols-1 gap-8 xl:grid-cols-[280px_1fr]">
+        <>
+            <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(212,235,248,0.35),_transparent_26%),linear-gradient(180deg,_#fbfbfa_0%,_#f6f2ec_100%)] pt-36 pb-20">
+                <div className="mx-auto max-w-[90rem] px-6 md:px-12">
+                    <div className="grid grid-cols-1 gap-8 xl:grid-cols-[280px_1fr]">
                     <aside className="rounded-[32px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.72)_0%,rgba(247,245,242,0.96)_100%)] p-6 shadow-[0_10px_30px_rgba(0,0,0,0.04)]">
                         <p className="mb-5 text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">Grammar Topics</p>
                         <div className="space-y-2">
@@ -356,9 +442,95 @@ const Grammar = () => {
                                     </div>
 
                                     <div className="space-y-5 p-5 sm:p-6">
+                                        {result && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setIsLessonOpen(true)}
+                                                className="group flex w-full items-center justify-between rounded-[26px] border border-indigo-200 bg-[linear-gradient(135deg,rgba(238,242,255,0.95)_0%,rgba(255,255,255,0.98)_100%)] px-5 py-4 text-left shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_14px_28px_rgba(99,102,241,0.12)]"
+                                            >
+                                                <div className="flex items-center gap-4">
+                                                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-600 text-white shadow-sm">
+                                                        <Icon icon="solar:clapperboard-play-linear" width="22" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-base font-dm-sans font-semibold tracking-tight text-[#111]">Explain Like a Teacher</p>
+                                                        <p className="mt-1 text-sm text-neutral-500 font-sans">
+                                                            Open an animated lesson with spoken narration and guided steps.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <Icon
+                                                    icon="solar:alt-arrow-right-linear"
+                                                    width="22"
+                                                    className="text-indigo-500 transition-transform duration-200 group-hover:translate-x-1"
+                                                />
+                                            </button>
+                                        )}
+
                                         <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
                                             <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Correction</p>
-                                            <p className="text-lg font-dm-sans font-semibold text-[#111]">{result?.correction}</p>
+                                            {(() => {
+                                                const diff = buildSentenceDiff(analyzedText, result?.correction || '');
+
+                                                if (!diff.hasChange) {
+                                                    return <p className="text-lg font-dm-sans font-semibold text-[#111]">{result?.correction}</p>;
+                                                }
+
+                                                return (
+                                                    <div className="space-y-4">
+                                                        <div className="rounded-[22px] border border-rose-100 bg-rose-50/65 p-4">
+                                                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-rose-500 mb-2">Original</p>
+                                                            <p className="text-[15px] font-sans text-neutral-700">
+                                                                <SentenceLine
+                                                                    before={diff.originalBefore}
+                                                                    changed={diff.originalChanged}
+                                                                    after={diff.originalAfter}
+                                                                    changeClassName="rounded-xl bg-rose-100 px-2 py-1 font-semibold text-rose-700 shadow-[inset_0_0_0_1px_rgba(244,63,94,0.12)]"
+                                                                />
+                                                            </p>
+                                                        </div>
+
+                                                        <div className="flex items-center justify-center gap-3 text-sm font-semibold text-neutral-400">
+                                                            <motion.span
+                                                                initial={{ opacity: 0, x: -10 }}
+                                                                animate={{ opacity: 1, x: 0 }}
+                                                                transition={{ duration: 0.5, ease: 'easeOut' }}
+                                                                className="rounded-full bg-neutral-100 px-3 py-1"
+                                                            >
+                                                                {diff.originalChanged || 'Updated'}
+                                                            </motion.span>
+                                                            <motion.span
+                                                                initial={{ opacity: 0, x: -16 }}
+                                                                animate={{ opacity: 1, x: [0, 8, 0] }}
+                                                                transition={{ duration: 1.2, repeat: Infinity, repeatDelay: 0.6, ease: 'easeInOut' }}
+                                                                className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 text-emerald-600 shadow-sm"
+                                                            >
+                                                                <Icon icon="solar:arrow-right-linear" width="18" />
+                                                            </motion.span>
+                                                            <motion.span
+                                                                initial={{ opacity: 0, x: 10 }}
+                                                                animate={{ opacity: 1, x: 0 }}
+                                                                transition={{ duration: 0.5, ease: 'easeOut', delay: 0.05 }}
+                                                                className="rounded-full bg-emerald-100 px-3 py-1 text-emerald-700"
+                                                            >
+                                                                {diff.correctedChanged || 'Improved'}
+                                                            </motion.span>
+                                                        </div>
+
+                                                        <div className="rounded-[22px] border border-emerald-100 bg-emerald-50/75 p-4">
+                                                            <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-emerald-600 mb-2">Correct Sentence</p>
+                                                            <p className="text-lg font-dm-sans font-semibold text-[#111]">
+                                                                <SentenceLine
+                                                                    before={diff.correctedBefore}
+                                                                    changed={diff.correctedChanged}
+                                                                    after={diff.correctedAfter}
+                                                                    changeClassName="rounded-xl bg-emerald-100 px-2 py-1 text-emerald-700 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.12)]"
+                                                                />
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })()}
                                         </div>
 
                                         <div className="grid grid-cols-2 gap-3">
@@ -445,6 +617,15 @@ const Grammar = () => {
                                             </div>
                                         )}
 
+                                        {result?.diagram && (
+                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
+                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Visual Diagram</p>
+                                                <pre className="overflow-x-auto whitespace-pre-wrap rounded-2xl border border-neutral-100 bg-neutral-50 px-4 py-3 text-sm leading-relaxed text-neutral-700 font-sans">
+                                                    {result.diagram}
+                                                </pre>
+                                            </div>
+                                        )}
+
                                         {result?.tips && result.tips.length > 0 && (
                                             <div className="rounded-[24px] border border-neutral-200 bg-white p-5 shadow-sm">
                                                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400 mb-3">Grammar Tips</p>
@@ -472,6 +653,7 @@ const Grammar = () => {
                                                 </ul>
                                             </div>
                                         )}
+
                                     </div>
                                 </motion.section>
                             )}
@@ -479,7 +661,15 @@ const Grammar = () => {
                     </div>
                 </div>
             </div>
-        </div>
+            </div>
+
+            <LessonPlayer
+                isOpen={isLessonOpen}
+                steps={result?.lessonSteps || []}
+                voiceScript={result?.voiceScript || ''}
+                onClose={() => setIsLessonOpen(false)}
+            />
+        </>
     );
 };
 
