@@ -36,7 +36,7 @@ const FAQSection = () => {
                             <Icon icon="solar:alt-arrow-down-linear" width="20" className="text-neutral-400 group-open:rotate-180 transition-transform duration-300" />
                         </summary>
                         <div className="px-6 pb-6 text-neutral-500 text-base leading-relaxed font-sans">
-                            Currently, Sonara supports English, Spanish, French, Korean, Mandarin, and Hindi. We are constantly training our models to support more languages in the future.
+                            Sonara currently focuses on English pronunciation and grammar feedback. Because it is powered by the Gemini multimodal model, the system can be extended to support additional languages such as Spanish, French, Korean, Mandarin, and Hindi in future updates.
                         </div>
                     </details>
 
