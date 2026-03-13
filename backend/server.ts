@@ -8,6 +8,7 @@ import analyzeRoute from './routes/analyze.ts';
 import progressRoute from './routes/progress.ts';
 import grammarRoute from './routes/grammar.ts';
 import { setupLiveProxy } from './liveProxy.ts';
+import { setupConversationRoomServer } from './rooms/liveConversationServer.ts';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -46,6 +47,7 @@ const server = http.createServer(app);
 
 // Gemini Live WebSocket proxy — API key stays server-side
 setupLiveProxy(server);
+setupConversationRoomServer(server, Array.from(allowedOrigins));
 
 server.listen(port, () => {
     console.log(`Sonara backend listening at http://localhost:${port}`);
