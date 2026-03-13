@@ -11,6 +11,7 @@ import Library from './pages/Library';
 import ReadingViewer from './pages/ReadingViewer';
 import Login from './pages/Login';
 import Grammar from './pages/Grammar';
+import Rooms from './pages/Rooms';
 
 function App() {
   return (
@@ -18,10 +19,11 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/" element={<MainLayout />}>
+            <Route path="/" element={<MainLayout />}>
             <Route index element={<Home />} />
             <Route path="dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="practice" element={<ProtectedRoute><Practice /></ProtectedRoute>} />
+            <Route path="rooms" element={<ProtectedRoute><Rooms /></ProtectedRoute>} />
             <Route path="grammar" element={<ProtectedRoute><Grammar /></ProtectedRoute>} />
             <Route path="library" element={<ProtectedRoute><Library /></ProtectedRoute>} />
             <Route path="read/:id" element={<ProtectedRoute><ReadingViewer /></ProtectedRoute>} />
