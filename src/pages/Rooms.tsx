@@ -22,6 +22,17 @@ import {
 type CallState = 'idle' | 'waiting' | 'connected';
 type RoomStatus = 'Listening' | 'Transcribing' | 'Analyzing' | 'AI Coach Responding';
 
+type SubtitleEntry = {
+    id: string;
+    speakerRole: 'userA' | 'userB';
+    speakerLabel: string;
+    text: string;
+    isFinal: boolean;
+    createdAt: string;
+};
+
+const MAX_SUBTITLES = 20;
+
 const SILENCE_MS = 2000;
 const MIN_SPEECH_MS = 250;
 const SPEECH_THRESHOLD = 0.02;
@@ -47,6 +58,7 @@ const Rooms = () => {
     const [isMuted, setIsMuted] = useState(false);
     const [status, setStatus] = useState<RoomStatus>('Listening');
     const [transcript, setTranscript] = useState('');
+    const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]);
     const [analysis, setAnalysis] = useState('');
     const [mispronouncedWords, setMispronouncedWords] = useState<string[]>([]);
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -77,6 +89,7 @@ const Rooms = () => {
     const selfLabelRef = useRef(selfLabel);
     const userRoleRef = useRef<'userA' | 'userB'>('userA');
     const silenceTimerRef = useRef<number | null>(null);
+    const subtitlesEndRef = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         roomIdRef.current = roomId;
@@ -117,7 +130,7 @@ const Rooms = () => {
             return;
         }
 
-        console.log('audio captured');
+        console.log('[Rooms] speech turn ended, sending audio-stream-end');
         setStatus('Transcribing');
         roomSocket.emit('audio-stream-end');
     };
@@ -198,13 +211,10 @@ const Rooms = () => {
 
             if (hasSpeechRef.current && !isMutedRef.current && roomIdRef.current) {
                 pendingChunksRef.current.push(downsampled);
-                console.log('audio captured');
-                console.log('sending audio chunk');
                 roomSocketRef.current?.emit('audio-stream', {
                     pcmData: int16ToBase64(downsampled),
                     pcmMimeType: 'audio/pcm;rate=16000',
                 });
-                console.log('audio sent');
             }
         };
 
@@ -357,17 +367,37 @@ const Rooms = () => {
         });
 
         roomSocket.on('live-transcript', (payload: LiveTranscriptPayload) => {
-            if (payload.speakerRole !== userRoleRef.current) {
-                return;
+            if (payload.speakerRole === userRoleRef.current) {
+                setStatus(payload.isFinal ? 'Transcribing' : 'Listening');
+                setTranscript(payload.transcript);
             }
 
-            console.log('transcript received');
-            setStatus(payload.isFinal ? 'Transcribing' : 'Listening');
-            setTranscript(payload.transcript);
+            setSubtitles((prev) => {
+                const existingIdx = prev.findIndex(
+                    (s) => s.speakerRole === payload.speakerRole && !s.isFinal,
+                );
+                const entry: SubtitleEntry = {
+                    id: existingIdx >= 0 ? prev[existingIdx].id : `${payload.speakerRole}-${Date.now()}`,
+                    speakerRole: payload.speakerRole,
+                    speakerLabel: payload.speakerLabel,
+                    text: payload.transcript,
+                    isFinal: payload.isFinal,
+                    createdAt: payload.createdAt,
+                };
+
+                let next: SubtitleEntry[];
+                if (existingIdx >= 0) {
+                    next = [...prev];
+                    next[existingIdx] = entry;
+                } else {
+                    next = [...prev, entry];
+                }
+
+                return next.slice(-MAX_SUBTITLES);
+            });
         });
 
         roomSocket.on('ai-feedback', (payload: AIFeedback) => {
-            console.log('analysis received');
             setStatus('AI Coach Responding');
             const nextAnalysis = [payload.pronunciationTip, payload.interruptTip, payload.correction !== payload.transcript ? payload.correction : '']
                 .filter(Boolean)
@@ -381,7 +411,6 @@ const Rooms = () => {
             setMispronouncedWords(flagged ? [flagged] : []);
 
             if (payload.speechText?.trim()) {
-                console.log('ai voice received');
                 activeAiAudioRef.current?.pause();
                 const utterance = new SpeechSynthesisUtterance(payload.speechText);
                 utterance.onend = () => setStatus('Listening');
@@ -429,6 +458,10 @@ const Rooms = () => {
     useEffect(() => {
         userRoleRef.current = userRole;
     }, [userRole]);
+
+    useEffect(() => {
+        subtitlesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [subtitles]);
 
     const micScale = useMemo(() => {
         if (status === 'AI Coach Responding') return 1.1;
@@ -572,16 +605,35 @@ const Rooms = () => {
 
                     <div className="mt-6 grid gap-4 md:grid-cols-2">
                         <div className="rounded-[26px] border border-slate-200/80 bg-white/92 p-5 shadow-sm">
-                            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Transcript</p>
-                            <div className="mt-4 min-h-[140px] rounded-2xl bg-slate-50 px-4 py-4 text-left text-base leading-8 text-slate-900">
-                                {highlightedTranscript || (
+                            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Live Subtitles</p>
+                            <div role="log" aria-live="polite" className="mt-4 min-h-[140px] max-h-[280px] overflow-y-auto rounded-2xl bg-slate-50 px-4 py-4 text-left text-sm leading-7 text-slate-900">
+                                {subtitles.length > 0 ? (
+                                    subtitles.map((entry) => {
+                                        const isSelf = entry.speakerRole === userRole;
+                                        return (
+                                            <div key={entry.id} className={`mb-2 ${entry.isFinal ? '' : 'opacity-60'}`}>
+                                                <span className={`font-semibold ${isSelf ? 'text-emerald-700' : 'text-cyan-700'}`}>
+                                                    {entry.speakerLabel}:
+                                                </span>{' '}
+                                                <span>{entry.text}</span>
+                                            </div>
+                                        );
+                                    })
+                                ) : (
                                     <span className="text-slate-400">
-                                        {status === 'Transcribing' ? 'Transcription in progress.' : 'Waiting for speech.'}
+                                        {status === 'Transcribing' ? 'Transcription in progress...' : 'Waiting for speech...'}
                                     </span>
                                 )}
+                                <div ref={subtitlesEndRef} />
                             </div>
+                            {highlightedTranscript && (
+                                <div className="mt-3 rounded-xl bg-amber-50 px-3 py-2 text-sm text-slate-800">
+                                    <span className="font-medium text-amber-700">Your last turn: </span>
+                                    {highlightedTranscript}
+                                </div>
+                            )}
                             {mispronouncedWords.length > 0 && (
-                                <p className="mt-3 text-sm text-amber-700">Highlighted words may need clearer pronunciation.</p>
+                                <p className="mt-2 text-sm text-amber-700">Highlighted words may need clearer pronunciation.</p>
                             )}
                         </div>
 
