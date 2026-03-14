@@ -1,22 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from '@iconify/react';
 import type { Socket } from 'socket.io-client';
 import { useStore } from '../store/useStore';
-import RoomWaveform from '../components/RoomWaveform';
 import {
     base64ToBlob,
     blobToBase64,
+    type ClientTranscriptPayload,
     copyToClipboard,
     createConversationRoomSocket,
+    pcmFloat32ToBase64,
     type AIFeedback,
-    type AITip,
     type InviteRoomCreatedPayload,
+    type LiveTranscriptPayload,
     type RoomReadyPayload,
     type TranscriptEntry,
-    pcmFloat32ToBase64,
+    type UserConnectedPayload,
+    type UserPresencePayload,
 } from '../services/liveConversationRoom';
 
-type CallState = 'idle' | 'queueing' | 'waiting-link' | 'connected' | 'ended';
+type CallState = 'idle' | 'waiting' | 'connected';
+type ToastState = {
+    id: string;
+    title: string;
+    message: string;
+    tone: 'default' | 'success' | 'warning';
+};
 
 const relayMimeType = (() => {
     if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
@@ -25,28 +33,44 @@ const relayMimeType = (() => {
     return 'audio/webm';
 })();
 
+const waveformBars = [0, 1, 2, 3, 4];
+
+type BrowserSpeechRecognition = {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    start: () => void;
+    stop: () => void;
+    abort: () => void;
+    onresult: ((event: {
+        resultIndex: number;
+        results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+    }) => void) | null;
+    onerror: ((event: { error: string }) => void) | null;
+    onend: (() => void) | null;
+};
+
 const Rooms = () => {
     const { user } = useStore();
     const [callState, setCallState] = useState<CallState>('idle');
-    const [callStatus, setCallStatus] = useState('Ready to join a room');
-    const [coachStatus, setCoachStatus] = useState('AI coach standing by');
+    const [callStatus, setCallStatus] = useState('Invite someone to start a conversation');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [isSocketConnected, setIsSocketConnected] = useState(false);
     const [roomId, setRoomId] = useState<string | null>(null);
+    const [inviteUrl, setInviteUrl] = useState('');
     const [userRole, setUserRole] = useState<'userA' | 'userB'>('userA');
     const [selfLabel, setSelfLabel] = useState(user?.name || 'You');
-    const [partnerLabel, setPartnerLabel] = useState('Waiting for match');
-    const [inviteUrl, setInviteUrl] = useState('');
+    const [partnerLabel, setPartnerLabel] = useState('Waiting for another speaker');
+    const [isSocketConnected, setIsSocketConnected] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
     const [isMicActive, setIsMicActive] = useState(false);
+    const [selfLevel, setSelfLevel] = useState(0);
+    const [partnerLevel, setPartnerLevel] = useState(0);
+    const [isAISpeaking, setIsAISpeaking] = useState(false);
+    const [liveTranscript, setLiveTranscript] = useState<LiveTranscriptPayload | null>(null);
     const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
     const [feedbackItems, setFeedbackItems] = useState<AIFeedback[]>([]);
-    const [liveTip, setLiveTip] = useState<AITip | null>(null);
-    const [waveformSamples, setWaveformSamples] = useState<number[]>([]);
-    const [lastAudioSentAt, setLastAudioSentAt] = useState<string | null>(null);
-    const [lastGeminiAudioAt, setLastGeminiAudioAt] = useState<string | null>(null);
-    const [lastTranscriptAt, setLastTranscriptAt] = useState<string | null>(null);
-    const [lastTranscriptText, setLastTranscriptText] = useState('');
+    const [toast, setToast] = useState<ToastState | null>(null);
+    const [copyToast, setCopyToast] = useState(false);
 
     const socketRef = useRef<Socket | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -54,152 +78,86 @@ const Rooms = () => {
     const micContextRef = useRef<AudioContext | null>(null);
     const pcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
     const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-    const isMutedRef = useRef(false);
-    const isRoomActiveRef = useRef(false);
-    const inviteJoinAttemptedRef = useRef(false);
-    const liveTipTimeoutRef = useRef<number | null>(null);
     const partnerAudioQueueRef = useRef<Array<{ audio: string; mimeType: string }>>([]);
     const isPlayingPartnerAudioRef = useRef(false);
+    const isMutedRef = useRef(false);
+    const isRoomActiveRef = useRef(false);
+    const isMicActiveRef = useRef(false);
+    const userRoleRef = useRef<'userA' | 'userB'>('userA');
+    const inviteJoinAttemptedRef = useRef(false);
+    const pendingStartCallRef = useRef(false);
+    const speechVoicesRef = useRef<SpeechSynthesisVoice[]>([]);
+    const toastTimerRef = useRef<number | null>(null);
+    const copyToastTimerRef = useRef<number | null>(null);
+    const partnerLevelTimerRef = useRef<number | null>(null);
+    const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
+    const recognitionStoppedRef = useRef(false);
 
     useEffect(() => {
         isMutedRef.current = isMuted;
     }, [isMuted]);
 
     useEffect(() => {
-        const socket = createConversationRoomSocket();
-        socketRef.current = socket;
+        isMicActiveRef.current = isMicActive;
+    }, [isMicActive]);
 
-        socket.on('connect', () => {
-            setIsSocketConnected(true);
-            setErrorMessage(null);
-            setCallStatus('Ready to join a room');
+    useEffect(() => {
+        userRoleRef.current = userRole;
+    }, [userRole]);
 
-            const roomParam = new URLSearchParams(window.location.search).get('room');
-            if (roomParam && !inviteJoinAttemptedRef.current) {
-                inviteJoinAttemptedRef.current = true;
-                setCallState('waiting-link');
-                setCallStatus('Joining shared room...');
-                socket.emit('join-room', { roomId: roomParam, name: user?.name || 'Guest' });
-            }
+    useEffect(() => {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+            const updateVoices = () => {
+                speechVoicesRef.current = window.speechSynthesis.getVoices();
+            };
+            updateVoices();
+            window.speechSynthesis.addEventListener('voiceschanged', updateVoices);
+            return () => {
+                window.speechSynthesis.removeEventListener('voiceschanged', updateVoices);
+            };
+        }
+        return undefined;
+    }, []);
+
+    const showToast = (title: string, message: string, tone: ToastState['tone'] = 'default') => {
+        setToast({
+            id: crypto.randomUUID(),
+            title,
+            message,
+            tone,
         });
+        if (toastTimerRef.current) {
+            window.clearTimeout(toastTimerRef.current);
+        }
+        toastTimerRef.current = window.setTimeout(() => {
+            setToast(null);
+        }, 3000);
+    };
 
-        socket.on('connect_error', () => {
-            setIsSocketConnected(false);
-            setCallState('idle');
-            setCallStatus('Room server offline');
-            setCoachStatus('AI coach unavailable');
-            setErrorMessage('Unable to reach the room server on port 3000. Start the backend and try again.');
-        });
+    const pickVoice = (voices: SpeechSynthesisVoice[]) =>
+        voices.find((voice) => /english/i.test(voice.lang) && /female|samantha|victoria|serena|aria|ava|allison/i.test(voice.name))
+        ?? voices.find((voice) => /english/i.test(voice.lang))
+        ?? voices[0]
+        ?? null;
 
-        socket.on('disconnect', () => {
-            setIsSocketConnected(false);
-            setCallState('idle');
-            setCallStatus('Disconnected from room server');
-        });
+    const speakFeedback = (feedback: AIFeedback) => {
+        if (typeof window === 'undefined' || !('speechSynthesis' in window) || !feedback.speechText.trim()) {
+            return;
+        }
 
-        socket.on('queue-status', ({ status }: { status: string }) => {
-            setCallState('queueing');
-            setCallStatus(status);
-            setPartnerLabel('Waiting for match');
-            setErrorMessage(null);
-        });
-
-        socket.on('invite-room-created', (payload: InviteRoomCreatedPayload) => {
-            setRoomId(payload.roomId);
-            setUserRole(payload.role);
-            setSelfLabel(payload.selfLabel);
-            setInviteUrl(payload.shareUrl);
-            setCallState('waiting-link');
-            setCallStatus('Invite link ready. Waiting for your friend...');
-            setPartnerLabel('Waiting for your friend');
-            isRoomActiveRef.current = true;
-            setErrorMessage(null);
-        });
-
-        socket.on('call-status', ({ status }: { status: string }) => {
-            setCallStatus(status);
-        });
-
-        socket.on('coach-status', ({ status }: { status: string }) => {
-            setCoachStatus(status);
-        });
-
-        socket.on('room-ready', (payload: RoomReadyPayload) => {
-            setRoomId(payload.roomId);
-            setUserRole(payload.role);
-            setSelfLabel(payload.selfLabel);
-            setPartnerLabel(payload.partnerLabel);
-            setCallState('connected');
-            setCallStatus('Room connected. Tap the mic to start speaking.');
-            isRoomActiveRef.current = true;
-            setErrorMessage(null);
-        });
-
-        socket.on('room-error', ({ message }: { message: string }) => {
-            setErrorMessage(message);
-            setCallStatus('Room unavailable');
-        });
-
-        socket.on('transcript-entry', (entry: TranscriptEntry) => {
-            setTranscripts((current) => [entry, ...current].slice(0, 24));
-        });
-
-        socket.on('ai-feedback', (feedback: AIFeedback) => {
-            setFeedbackItems((current) => [feedback, ...current].slice(0, 12));
-        });
-
-        socket.on('room-debug', (payload: {
-            type: 'audio-sent' | 'gemini-audio-received' | 'gemini-transcript' | 'gemini-status';
-            createdAt: string;
-            transcript?: string;
-            status?: string;
-        }) => {
-            if (payload.type === 'audio-sent') {
-                setLastAudioSentAt(payload.createdAt);
-            } else if (payload.type === 'gemini-audio-received') {
-                setLastGeminiAudioAt(payload.createdAt);
-            } else if (payload.type === 'gemini-transcript') {
-                setLastTranscriptAt(payload.createdAt);
-                setLastTranscriptText(payload.transcript || '');
-            } else if (payload.type === 'gemini-status' && payload.status) {
-                setCoachStatus(payload.status);
-            }
-        });
-
-        socket.on('ai-tip', (tip: AITip) => {
-            setLiveTip(tip);
-            if (liveTipTimeoutRef.current) {
-                window.clearTimeout(liveTipTimeoutRef.current);
-            }
-            liveTipTimeoutRef.current = window.setTimeout(() => {
-                setLiveTip(null);
-            }, 3200);
-        });
-
-        socket.on('partner-audio', ({ audio, mimeType }: { audio: string; mimeType: string }) => {
-            partnerAudioQueueRef.current.push({ audio, mimeType });
-            void playNextPartnerChunk();
-        });
-
-        socket.on('room-ended', ({ message }: { message: string }) => {
-            setCallState('ended');
-            setCallStatus(message);
-            setRoomId(null);
-            setInviteUrl('');
-            setPartnerLabel('Waiting for match');
-            isRoomActiveRef.current = false;
-            stopSpeaking();
-        });
-
-        return () => {
-            if (liveTipTimeoutRef.current) {
-                window.clearTimeout(liveTipTimeoutRef.current);
-            }
-            stopSpeaking();
-            mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
-            socket.disconnect();
-        };
-    }, [user?.name]);
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(feedback.speechText);
+        const voice = pickVoice(speechVoicesRef.current);
+        if (voice) {
+            utterance.voice = voice;
+        }
+        utterance.rate = 1;
+        utterance.pitch = 1;
+        utterance.onstart = () => setIsAISpeaking(true);
+        utterance.onend = () => setIsAISpeaking(false);
+        utterance.onerror = () => setIsAISpeaking(false);
+        window.speechSynthesis.speak(utterance);
+    };
 
     const playNextPartnerChunk = async () => {
         if (isPlayingPartnerAudioRef.current) {
@@ -216,53 +174,105 @@ const Rooms = () => {
         const url = URL.createObjectURL(blob);
         const audio = new Audio(url);
 
-        const finishPlayback = () => {
+        const finish = () => {
             URL.revokeObjectURL(url);
             isPlayingPartnerAudioRef.current = false;
+            if (partnerAudioQueueRef.current.length === 0) {
+                setPartnerLevel(0);
+            }
             void playNextPartnerChunk();
         };
 
-        audio.onended = finishPlayback;
-        audio.onerror = finishPlayback;
+        audio.onended = finish;
+        audio.onerror = finish;
 
         try {
             await audio.play();
         } catch {
-            finishPlayback();
+            finish();
         }
     };
 
-    const ensureMicrophone = async () => {
-        if (mediaStreamRef.current) {
-            return mediaStreamRef.current;
+    const stopTranscriptRecognition = () => {
+        recognitionStoppedRef.current = true;
+        recognitionRef.current?.stop();
+    };
+
+    const startTranscriptRecognition = () => {
+        const recognitionWindow = window as Window & {
+            SpeechRecognition?: new () => BrowserSpeechRecognition;
+            webkitSpeechRecognition?: new () => BrowserSpeechRecognition;
+        };
+        const SpeechRecognitionCtor = recognitionWindow.SpeechRecognition || recognitionWindow.webkitSpeechRecognition;
+        if (!SpeechRecognitionCtor || !socketRef.current) {
+            return;
         }
 
+        if (!recognitionRef.current) {
+            const recognition = new SpeechRecognitionCtor();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+
+            recognition.onresult = (event: {
+                resultIndex: number;
+                results: ArrayLike<{ isFinal: boolean; 0: { transcript: string } }>;
+            }) => {
+                let interimTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i += 1) {
+                    const transcript = event.results[i]?.[0]?.transcript?.trim();
+                    if (!transcript) {
+                        continue;
+                    }
+
+                    if (event.results[i].isFinal) {
+                        socketRef.current?.emit('client-final-transcript', { transcript } satisfies ClientTranscriptPayload);
+                    } else {
+                        interimTranscript = transcript;
+                    }
+                }
+
+                if (interimTranscript) {
+                    socketRef.current?.emit('client-live-transcript', { transcript: interimTranscript } satisfies ClientTranscriptPayload);
+                }
+            };
+
+            recognition.onerror = (event: { error: string }) => {
+                if (event.error !== 'no-speech' && event.error !== 'aborted') {
+                    setErrorMessage(`Speech recognition error: ${event.error}`);
+                }
+            };
+
+            recognition.onend = () => {
+                if (recognitionStoppedRef.current) {
+                    recognitionStoppedRef.current = false;
+                    return;
+                }
+
+                if (isRoomActiveRef.current && isMicActiveRef.current) {
+                    try {
+                        recognition.start();
+                    } catch {
+                        // intentionally ignored
+                    }
+                }
+            };
+
+            recognitionRef.current = recognition;
+        }
+
+        recognitionStoppedRef.current = false;
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    sampleRate: 16000,
-                    channelCount: 1,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                },
-            });
-            mediaStreamRef.current = stream;
-            setErrorMessage(null);
-            return stream;
-        } catch (error) {
-            if (error instanceof DOMException && error.name === 'NotAllowedError') {
-                setErrorMessage('Microphone permission was denied. Allow mic access in the browser and try again.');
-                setCallStatus('Microphone access blocked');
-            } else {
-                setErrorMessage('Unable to access your microphone right now.');
-                setCallStatus('Microphone unavailable');
-            }
-            throw error;
+            recognitionRef.current?.start();
+        } catch {
+            // intentionally ignored
         }
     };
 
     const stopSpeaking = () => {
         socketRef.current?.emit('audio-stream-end');
+        stopTranscriptRecognition();
 
         if (relayRecorderRef.current && relayRecorderRef.current.state !== 'inactive') {
             relayRecorderRef.current.stop();
@@ -281,16 +291,155 @@ const Rooms = () => {
         }
 
         setIsMicActive(false);
-        setWaveformSamples([]);
+        setSelfLevel(0);
+    };
+
+    useEffect(() => {
+        const socket = createConversationRoomSocket();
+        socketRef.current = socket;
+
+        socket.on('connect', () => {
+            setIsSocketConnected(true);
+            setErrorMessage(null);
+
+            if (pendingStartCallRef.current) {
+                pendingStartCallRef.current = false;
+                socket.emit('start-call', { name: user?.name || 'Host' });
+            }
+
+            const roomParam = new URLSearchParams(window.location.search).get('room');
+            if (roomParam && !inviteJoinAttemptedRef.current) {
+                inviteJoinAttemptedRef.current = true;
+                socket.emit('join-room', { roomId: roomParam, name: user?.name || 'Guest' });
+            }
+        });
+
+        socket.on('disconnect', () => {
+            setIsSocketConnected(false);
+        });
+
+        socket.on('connect_error', () => {
+            setIsSocketConnected(false);
+            setErrorMessage('Unable to reach the room server on port 3000.');
+        });
+
+        socket.on('invite-room-created', (payload: InviteRoomCreatedPayload) => {
+            setRoomId(payload.roomId);
+            setInviteUrl(payload.shareUrl);
+            setUserRole(payload.role);
+            setSelfLabel(payload.selfLabel);
+            setPartnerLabel('Waiting for another speaker');
+            setCallState('waiting');
+            setCallStatus('Waiting for another speaker...');
+            isRoomActiveRef.current = true;
+        });
+
+        socket.on('room-ready', (payload: RoomReadyPayload) => {
+            setRoomId(payload.roomId);
+            setUserRole(payload.role);
+            setSelfLabel(payload.selfLabel);
+            setPartnerLevel(0);
+            setPartnerLabel(payload.partnerLabel === 'Waiting for join' ? 'Waiting for another speaker' : payload.partnerLabel);
+            setCallState(payload.partnerLabel === 'Waiting for join' ? 'waiting' : 'connected');
+            setCallStatus(payload.partnerLabel === 'Waiting for join' ? 'Waiting for another speaker...' : 'Speaker connected');
+            isRoomActiveRef.current = true;
+        });
+
+        socket.on('user-joined', (payload: UserPresencePayload) => {
+            const partner = payload.participants.find((participant) => participant.role !== userRoleRef.current);
+            if (partner) {
+                setPartnerLabel(partner.label);
+                setCallState('connected');
+                setCallStatus('Speaker connected');
+            }
+        });
+
+        socket.on('user-connected', (payload: UserConnectedPayload) => {
+            setCallState('connected');
+            showToast(payload.title, payload.message, 'success');
+        });
+
+        socket.on('room-full', ({ message }: { message: string }) => {
+            setErrorMessage(message);
+            showToast('Room full', message, 'warning');
+        });
+
+        socket.on('room-error', ({ message }: { message: string }) => {
+            setErrorMessage(message);
+        });
+
+        socket.on('room-ended', ({ message }: { message: string }) => {
+            setPartnerLabel('Waiting for another speaker');
+            setCallState('waiting');
+            setCallStatus('Waiting for another speaker...');
+            setLiveTranscript(null);
+            isRoomActiveRef.current = false;
+            setPartnerLevel(0);
+            stopSpeaking();
+            showToast('Partner left', message || 'Your partner left the conversation', 'warning');
+        });
+
+        socket.on('live-transcript', (payload: LiveTranscriptPayload) => {
+            if (payload.isFinal) {
+                setLiveTranscript(null);
+                return;
+            }
+            setLiveTranscript(payload);
+        });
+
+        socket.on('transcript-entry', (entry: TranscriptEntry) => {
+            setTranscripts((current) => [entry, ...current].slice(0, 30));
+        });
+
+        socket.on('ai-feedback', (feedback: AIFeedback) => {
+            setFeedbackItems((current) => [feedback, ...current].slice(0, 10));
+            speakFeedback(feedback);
+        });
+
+        socket.on('partner-audio', ({ audio, mimeType }: { audio: string; mimeType: string }) => {
+            partnerAudioQueueRef.current.push({ audio, mimeType });
+            setPartnerLevel(0.88);
+            if (partnerLevelTimerRef.current) {
+                window.clearTimeout(partnerLevelTimerRef.current);
+            }
+            partnerLevelTimerRef.current = window.setTimeout(() => {
+                setPartnerLevel(0.18);
+            }, 380);
+            void playNextPartnerChunk();
+        });
+
+        return () => {
+            if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+            if (copyToastTimerRef.current) window.clearTimeout(copyToastTimerRef.current);
+            if (partnerLevelTimerRef.current) window.clearTimeout(partnerLevelTimerRef.current);
+            window.speechSynthesis?.cancel();
+            recognitionRef.current?.abort();
+            stopSpeaking();
+            mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+            socket.disconnect();
+        };
+    }, [user?.name]);
+
+    const ensureMicrophone = async () => {
+        if (mediaStreamRef.current) {
+            return mediaStreamRef.current;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+                sampleRate: 16000,
+                channelCount: 1,
+                echoCancellation: true,
+                noiseSuppression: true,
+            },
+        });
+        mediaStreamRef.current = stream;
+        return stream;
     };
 
     const startSpeaking = async () => {
         if (!roomId || !socketRef.current) {
-            setErrorMessage('Join a room before starting the microphone.');
-            return;
-        }
-
-        if (isMicActive) {
+            setErrorMessage('Start a call or join a room before speaking.');
             return;
         }
 
@@ -317,22 +466,22 @@ const Rooms = () => {
             const outputData = event.outputBuffer.getChannelData(0);
             outputData.fill(0);
 
-            if (isMutedRef.current || !isRoomActiveRef.current) {
-                return;
-            }
-
             const inputData = event.inputBuffer.getChannelData(0);
             let sum = 0;
             for (let i = 0; i < inputData.length; i += 1) {
                 sum += inputData[i] * inputData[i];
             }
-            const rms = Math.sqrt(sum / inputData.length);
-            const normalized = Math.min(1, rms * 6 + 0.08);
-            setWaveformSamples((current) => [...current.slice(-27), normalized]);
 
-            const pcmData = pcmFloat32ToBase64(inputData);
+            const rms = Math.sqrt(sum / inputData.length);
+            const normalized = Math.min(1, rms * 8);
+            setSelfLevel(normalized);
+
+            if (isMutedRef.current || !isRoomActiveRef.current) {
+                return;
+            }
+
             socket.emit('audio-stream', {
-                pcmData,
+                pcmData: pcmFloat32ToBase64(inputData),
                 pcmMimeType: 'audio/pcm;rate=16000',
             });
         };
@@ -343,106 +492,76 @@ const Rooms = () => {
                 return;
             }
 
-            try {
-                const mediaData = await blobToBase64(event.data);
-                socket.emit('audio-stream', {
-                    mediaData,
-                    mediaMimeType: event.data.type || relayMimeType,
-                });
-            } catch {
-                setErrorMessage('Could not process a microphone chunk for room audio.');
-            }
+            const mediaData = await blobToBase64(event.data);
+            socket.emit('audio-stream', {
+                mediaData,
+                mediaMimeType: event.data.type || relayMimeType,
+            });
         };
 
         relayRecorder.onstop = () => {
             setIsMicActive(false);
+            setSelfLevel(0);
         };
 
-        relayRecorder.start(300);
+        relayRecorder.start(250);
         relayRecorderRef.current = relayRecorder;
         setIsMicActive(true);
-        setCallStatus('Microphone live');
+        startTranscriptRecognition();
     };
 
-    const joinQueue = () => {
-        if (!socketRef.current) {
-            setErrorMessage('Room connection is still initializing.');
+    const handleStartCall = () => {
+        const socket = socketRef.current;
+        if (!socket) {
             return;
         }
 
-        if (!isSocketConnected) {
-            socketRef.current.connect();
-            setErrorMessage('Trying to reconnect to the room server...');
-            return;
-        }
-
-        setInviteUrl('');
+        setErrorMessage(null);
         setTranscripts([]);
         setFeedbackItems([]);
-        setLiveTip(null);
-        setLastAudioSentAt(null);
-        setLastGeminiAudioAt(null);
-        setLastTranscriptAt(null);
-        setLastTranscriptText('');
-        setCallState('queueing');
-        setCallStatus('Joining anonymous queue...');
-        setErrorMessage(null);
-        socketRef.current.emit('join-queue', { name: user?.name || 'Guest' });
-    };
-
-    const createInvite = () => {
-        if (!socketRef.current) {
-            setErrorMessage('Room connection is still initializing.');
-            return;
-        }
+        setLiveTranscript(null);
+        setCopyToast(false);
 
         if (!isSocketConnected) {
-            socketRef.current.connect();
-            setErrorMessage('Trying to reconnect to the room server...');
+            pendingStartCallRef.current = true;
+            socket.connect();
             return;
         }
 
-        setTranscripts([]);
-        setFeedbackItems([]);
-        setLiveTip(null);
-        setLastAudioSentAt(null);
-        setLastGeminiAudioAt(null);
-        setLastTranscriptAt(null);
-        setLastTranscriptText('');
-        setErrorMessage(null);
-        socketRef.current.emit('create-invite-room', { name: user?.name || 'Host' });
+        socket.emit('start-call', { name: user?.name || 'Host' });
     };
 
-    const copyInviteLink = async () => {
+    const handleCopyInvite = async () => {
         if (!inviteUrl) {
             return;
         }
 
         try {
             await copyToClipboard(inviteUrl);
-            setCallStatus('Invite link copied');
+            setCopyToast(true);
+            if (copyToastTimerRef.current) {
+                window.clearTimeout(copyToastTimerRef.current);
+            }
+            copyToastTimerRef.current = window.setTimeout(() => {
+                setCopyToast(false);
+            }, 2000);
         } catch {
-            setErrorMessage('Could not copy the invite link.');
+            setErrorMessage('Could not copy invite link.');
         }
     };
 
     const toggleMicrophone = async () => {
-        if (!roomId || callState !== 'connected') {
-            setErrorMessage('Match with someone or open a shared room before turning on the microphone.');
+        if (!roomId) {
             return;
         }
 
         if (isMicActive) {
             stopSpeaking();
-            setCallStatus('Microphone paused');
             return;
         }
 
-        try {
-            await startSpeaking();
-        } catch {
-            // Error state is already set in ensureMicrophone.
-        }
+        setErrorMessage(null);
+        await startSpeaking();
     };
 
     const leaveRoom = () => {
@@ -450,344 +569,278 @@ const Rooms = () => {
         socketRef.current?.emit('leave-room');
         setRoomId(null);
         setInviteUrl('');
-        setPartnerLabel('Waiting for match');
+        setCallState('idle');
+        setCallStatus('Invite someone to start a conversation');
+        setPartnerLabel('Waiting for another speaker');
+        setLiveTranscript(null);
+        setTranscripts([]);
+        setFeedbackItems([]);
         isRoomActiveRef.current = false;
-        setCallState('ended');
-        setCallStatus('You left the room');
     };
 
-    const primaryFeedback = feedbackItems[0];
-    const inviteParam = new URLSearchParams(window.location.search).get('room');
-    const showInviteButton = !inviteParam && !inviteUrl && !roomId;
-    const formatStamp = (value: string | null) =>
-        value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Waiting';
+    const auraLevel = useMemo(() => {
+        if (isAISpeaking) return 0.72;
+        if (partnerLevel > 0.12) return partnerLevel;
+        if (selfLevel > 0.12 && isMicActive && !isMuted) return selfLevel;
+        return callState === 'connected' ? 0.22 : 0.12;
+    }, [callState, isAISpeaking, isMicActive, isMuted, partnerLevel, selfLevel]);
+
+    const speakerStatus = useMemo(() => {
+        if (isAISpeaking) return 'AI coaching';
+        if (partnerLevel > 0.22) return 'Partner speaking';
+        if (selfLevel > 0.18 && isMicActive && !isMuted) return 'You are speaking';
+        return 'Listening';
+    }, [isAISpeaking, partnerLevel, selfLevel, isMicActive, isMuted]);
+
+    const helperMessage = callState === 'idle'
+        ? 'Invite someone to start a conversation'
+        : callState === 'waiting'
+            ? 'Waiting for another speaker...'
+            : '';
+
+    const feedbackTone = feedbackItems[0]?.severity === 'red'
+        ? 'text-rose-600'
+        : feedbackItems[0]?.severity === 'yellow'
+            ? 'text-amber-600'
+            : 'text-emerald-600';
+
+    const toastTone = toast?.tone === 'success'
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : toast?.tone === 'warning'
+            ? 'border-amber-200 bg-amber-50 text-amber-700'
+            : 'border-slate-200 bg-white text-slate-700';
 
     return (
-        <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(194,230,222,0.28),_transparent_28%),linear-gradient(180deg,_#fbfbfa_0%,_#f3efe8_100%)] pt-36 pb-20">
-            <div className="mx-auto max-w-6xl px-6 md:px-10">
-                <div className="rounded-[34px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.84)_0%,rgba(246,242,236,0.98)_100%)] shadow-[0_18px_45px_rgba(0,0,0,0.06)]">
-                    <div className="border-b border-[#e6e0d8] px-6 py-6 sm:px-8">
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                            <div>
-                                <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-400">Rooms</p>
-                                <h1 className="mt-2 text-[34px] font-dm-sans font-semibold tracking-tight text-[#111]">Live Conversation Room</h1>
-                                <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-500">
-                                    Match with another learner or share a direct room link, then speak live while Gemini listens for grammar and pronunciation coaching.
-                                </p>
-                            </div>
+        <div className="min-h-screen bg-[radial-gradient(circle_at_top,#f7fafc,transparent_30%),linear-gradient(180deg,#f6f4ef_0%,#eef3f8_100%)] px-4 pb-8 pt-24 text-slate-900 md:px-8">
+            <div className="mx-auto w-full max-w-6xl rounded-[34px] border border-white/70 bg-white/82 shadow-[0_28px_120px_rgba(15,23,42,0.10)] backdrop-blur">
+                <div className="px-5 pb-10 pt-6 md:px-10 md:pt-8">
+                    <div className="mb-6 flex items-center justify-between gap-4">
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.28em] text-slate-400">Sonara Live</p>
+                            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Voice room</h1>
+                            <p className="mt-2 text-sm text-slate-500">{callStatus}</p>
+                        </div>
+                        {roomId && (
+                            <button
+                                onClick={leaveRoom}
+                                className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 transition hover:border-rose-300 hover:bg-rose-100"
+                            >
+                                Leave
+                            </button>
+                        )}
+                    </div>
 
-                            <div className="rounded-[22px] border border-emerald-100 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-700 shadow-sm">
-                                <div className="flex items-center gap-2 font-medium">
-                                    <span className={`h-2.5 w-2.5 rounded-full ${coachStatus === 'Coach connected' ? 'bg-emerald-500' : 'bg-amber-400'}`} />
-                                    {coachStatus}
-                                </div>
-                                <p className="mt-1 text-xs text-emerald-600/90">Feedback stays private to the current speaker.</p>
+                    <div className="mb-6 rounded-[26px] border border-slate-200/80 bg-white/90 px-4 py-4 shadow-sm md:px-5">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                            <div className="min-w-0 flex-1">
+                                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Room Link</p>
+                                <p className="mt-2 truncate text-sm text-slate-600">
+                                    {inviteUrl || 'Create a room to get your invite link'}
+                                </p>
+                                <p className="mt-1 text-xs text-slate-400">Share this link with a friend to start speaking</p>
+                            </div>
+                            <div className="flex gap-2">
+                                {!roomId && (
+                                    <button
+                                        onClick={handleStartCall}
+                                        className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800"
+                                    >
+                                        Start Call
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => void handleCopyInvite()}
+                                    disabled={!inviteUrl}
+                                    className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 disabled:cursor-not-allowed disabled:text-slate-300"
+                                >
+                                    Copy Link
+                                </button>
                             </div>
                         </div>
                     </div>
 
-                    <div className="grid gap-6 px-6 py-6 sm:px-8 lg:grid-cols-[1.45fr_0.95fr]">
-                        <section className="space-y-6">
-                            <div className="relative overflow-hidden rounded-[30px] border border-[#e6e0d8] bg-[linear-gradient(135deg,rgba(17,24,39,0.96)_0%,rgba(38,59,74,0.96)_55%,rgba(88,108,104,0.92)_100%)] p-6 text-white shadow-[0_20px_50px_rgba(15,23,42,0.2)]">
-                                <div className="absolute inset-x-8 top-8 h-32 rounded-full bg-white/10 blur-3xl" />
-                                <div className="relative">
-                                    <div className="flex items-center justify-between gap-4">
-                                        <div>
-                                            <p className="text-xs uppercase tracking-[0.22em] text-white/60">Voice call</p>
-                                            <div className="mt-2 flex items-center gap-3">
-                                                <span className={`h-3 w-3 rounded-full ${callState === 'connected' ? 'bg-emerald-400' : callState === 'queueing' || callState === 'waiting-link' ? 'bg-amber-300' : 'bg-white/50'}`} />
-                                                <p className="text-lg font-medium">{callStatus}</p>
-                                            </div>
-                                        </div>
-                                        <div className="rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-white/70">
-                                            {roomId ? roomId.slice(0, 8) : 'Lobby'}
-                                        </div>
+                    <div className="relative flex min-h-[60vh] flex-col items-center justify-center overflow-hidden rounded-[30px] bg-[radial-gradient(circle_at_top,rgba(103,232,249,0.20),transparent_28%),linear-gradient(180deg,rgba(255,255,255,0.95),rgba(241,245,249,0.88))] px-4 py-10 text-center">
+                        {toast && (
+                            <div className={`absolute top-5 z-20 rounded-2xl border px-4 py-3 text-left shadow-lg transition-all duration-300 ${toastTone}`}>
+                                <p className="text-sm font-semibold">{toast.title}</p>
+                                <p className="text-sm">{toast.message}</p>
+                            </div>
+                        )}
+
+                        {copyToast && (
+                            <div className="absolute top-5 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-lg">
+                                Invite link copied
+                            </div>
+                        )}
+
+                        <div className="absolute inset-0 opacity-70">
+                            <div className="absolute left-1/2 top-[18%] h-56 w-56 -translate-x-1/2 rounded-full bg-cyan-100/70 blur-3xl animate-pulse" />
+                            <div className="absolute bottom-[10%] left-[18%] h-40 w-40 rounded-full bg-amber-100/50 blur-3xl" />
+                            <div className="absolute right-[16%] top-[24%] h-44 w-44 rounded-full bg-sky-100/60 blur-3xl" />
+                        </div>
+
+                        <div className="relative z-10 flex flex-col items-center">
+                            <div className="mb-5 flex items-center gap-6 text-sm text-slate-500">
+                                <div className={`rounded-full border px-3 py-1.5 transition ${
+                                    callState === 'connected'
+                                        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                                        : 'border-slate-200 bg-white text-slate-500'
+                                }`}>
+                                    {selfLabel}
+                                </div>
+                                <div className="h-px w-14 bg-gradient-to-r from-transparent via-slate-300 to-transparent" />
+                                <div className={`rounded-full border px-3 py-1.5 transition ${
+                                    callState === 'connected'
+                                        ? 'border-cyan-200 bg-cyan-50 text-cyan-700'
+                                        : 'border-slate-200 bg-white text-slate-500'
+                                }`}>
+                                    {partnerLabel}
+                                </div>
+                            </div>
+
+                            <button
+                                onClick={() => void toggleMicrophone()}
+                                disabled={!roomId}
+                                className="group relative h-[260px] w-[260px] rounded-full disabled:cursor-default"
+                            >
+                                <span
+                                    className="absolute inset-0 rounded-full bg-[radial-gradient(circle,rgba(34,211,238,0.45),rgba(56,189,248,0.18)_42%,transparent_72%)] animate-[aura-breathe_2.2s_ease-in-out_infinite]"
+                                    style={{ transform: `scale(${1 + auraLevel * 0.18})` }}
+                                />
+                                <span
+                                    className="absolute inset-[10%] rounded-full bg-[radial-gradient(circle,rgba(125,211,252,0.42),rgba(56,189,248,0.14)_60%,transparent_75%)] transition duration-150"
+                                    style={{ transform: `scale(${1 + auraLevel * 0.12})` }}
+                                />
+                                <span className="absolute inset-0 flex items-center justify-center">
+                                    <Icon
+                                        icon={isMuted ? 'lucide:mic-off' : 'lucide:mic'}
+                                        className={`h-14 w-14 transition ${
+                                            isMuted ? 'text-rose-500' : 'text-slate-800'
+                                        } ${roomId ? 'opacity-100' : 'opacity-50'}`}
+                                    />
+                                </span>
+                            </button>
+
+                            <div className="mt-4 min-h-[28px]">
+                                {helperMessage ? (
+                                    <p className="text-base text-slate-500">
+                                        {helperMessage}
+                                    </p>
+                                ) : (
+                                    <p className={`text-base font-medium ${isAISpeaking ? 'text-cyan-700' : feedbackTone || 'text-slate-600'}`}>
+                                        {speakerStatus}
+                                    </p>
+                                )}
+                            </div>
+
+                            {isAISpeaking && (
+                                <div className="mt-4 flex items-center gap-3 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-cyan-700 shadow-sm">
+                                    <div>
+                                        <p className="text-xs uppercase tracking-[0.2em]">AI Coach</p>
+                                        <p className="text-sm">Giving feedback...</p>
                                     </div>
-
-                                    <div className="mt-6 flex flex-wrap gap-3">
-                                        <button
-                                            onClick={joinQueue}
-                                            disabled={!!roomId || !isSocketConnected}
-                                            className={`rounded-full px-5 py-3 text-sm font-medium transition-all ${
-                                                !!roomId || !isSocketConnected
-                                                    ? 'cursor-not-allowed bg-white/10 text-white/50'
-                                                    : 'bg-white text-[#111] hover:bg-neutral-100'
-                                            }`}
-                                        >
-                                            Find partner
-                                        </button>
-                                        {showInviteButton && (
-                                            <button
-                                                onClick={createInvite}
-                                                disabled={!isSocketConnected}
-                                                className={`rounded-full px-5 py-3 text-sm font-medium transition-all ${
-                                                    !isSocketConnected
-                                                        ? 'cursor-not-allowed bg-white/10 text-white/50'
-                                                        : 'border border-white/15 bg-white/10 text-white hover:bg-white/15'
-                                                }`}
-                                            >
-                                                Create invite link
-                                            </button>
-                                        )}
-                                        {inviteUrl && (
-                                            <button
-                                                onClick={() => void copyInviteLink()}
-                                                className="rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition-all hover:bg-white/15"
-                                            >
-                                                Copy invite link
-                                            </button>
-                                        )}
-                                    </div>
-
-                                    {inviteUrl && (
-                                        <div className="mt-4 rounded-[22px] border border-white/15 bg-white/10 px-4 py-3 text-sm text-white/85">
-                                            <p className="text-xs uppercase tracking-[0.18em] text-white/60">Share link</p>
-                                            <p className="mt-2 break-all font-medium">{inviteUrl}</p>
-                                        </div>
-                                    )}
-
-                                    <div className="mt-5">
-                                        <RoomWaveform samples={waveformSamples} active={isMicActive && !isMuted} />
-                                    </div>
-
-                                    <div className="mt-4 grid gap-3 md:grid-cols-3">
-                                        {[
-                                            {
-                                                label: 'Audio sent',
-                                                value: formatStamp(lastAudioSentAt),
-                                                active: !!lastAudioSentAt,
-                                                icon: 'solar:microphone-3-bold',
-                                            },
-                                            {
-                                                label: 'Gemini received audio',
-                                                value: formatStamp(lastGeminiAudioAt),
-                                                active: !!lastGeminiAudioAt,
-                                                icon: 'solar:soundwave-bold',
-                                            },
-                                            {
-                                                label: 'Gemini returned transcript',
-                                                value: lastTranscriptAt ? `${formatStamp(lastTranscriptAt)}` : 'Waiting',
-                                                active: !!lastTranscriptAt,
-                                                icon: 'solar:chat-round-dots-bold',
-                                            },
-                                        ].map((item) => (
-                                            <div key={item.label} className={`rounded-[22px] border px-4 py-4 ${
-                                                item.active ? 'border-emerald-200/40 bg-emerald-50/12' : 'border-white/10 bg-white/8'
-                                            }`}>
-                                                <div className="flex items-center gap-2 text-white/80">
-                                                    <Icon icon={item.icon} width="16" />
-                                                    <p className="text-xs uppercase tracking-[0.16em]">{item.label}</p>
-                                                </div>
-                                                <p className="mt-3 text-sm font-medium text-white">{item.value}</p>
-                                            </div>
+                                    <div className="flex items-end gap-1">
+                                        {waveformBars.map((bar) => (
+                                            <span
+                                                key={bar}
+                                                className="w-1.5 rounded-full bg-cyan-500 animate-pulse"
+                                                style={{ height: `${10 + (bar % 3) * 7}px`, animationDelay: `${bar * 0.12}s` }}
+                                            />
                                         ))}
                                     </div>
-
-                                    {lastTranscriptText && (
-                                        <div className="mt-4 rounded-[22px] border border-sky-200/20 bg-sky-50/10 px-4 py-3 text-sm text-white/90">
-                                            <p className="text-xs uppercase tracking-[0.16em] text-white/60">Latest Gemini transcript</p>
-                                            <p className="mt-2">{lastTranscriptText}</p>
-                                        </div>
-                                    )}
-
-                                    <div className="mt-8 grid gap-6 md:grid-cols-2">
-                                        {[
-                                            {
-                                                label: userRole === 'userA' ? 'User A' : 'User B',
-                                                name: selfLabel,
-                                                icon: 'solar:user-circle-bold',
-                                                accent: 'from-[#bfe8dc] to-[#7ec4b8]',
-                                            },
-                                            {
-                                                label: userRole === 'userA' ? 'User B' : 'User A',
-                                                name: partnerLabel,
-                                                icon: 'solar:users-group-rounded-bold',
-                                                accent: 'from-[#f7d7b5] to-[#e6a86d]',
-                                            },
-                                        ].map((participant) => (
-                                            <div key={participant.label} className="rounded-[26px] border border-white/10 bg-white/10 p-5 backdrop-blur-md">
-                                                <div className={`flex h-18 w-18 items-center justify-center rounded-[22px] bg-gradient-to-br ${participant.accent} text-[#111] shadow-lg`}>
-                                                    <Icon icon={participant.icon} width="34" />
-                                                </div>
-                                                <p className="mt-4 text-xs uppercase tracking-[0.18em] text-white/55">{participant.label}</p>
-                                                <h2 className="mt-1 text-2xl font-dm-sans font-semibold tracking-tight">{participant.name}</h2>
-                                                <p className="mt-2 text-sm text-white/70">
-                                                    {participant.name === selfLabel
-                                                        ? isMicActive
-                                                            ? isMuted ? 'Microphone muted' : 'Speaking live'
-                                                            : 'Tap the mic after the room is connected'
-                                                        : callState === 'connected'
-                                                            ? 'Connected to the room'
-                                                            : 'Waiting to join'}
-                                                </p>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    {liveTip && (
-                                        <div className="mt-6 rounded-[22px] border border-amber-200/30 bg-amber-50/90 px-4 py-3 text-sm text-amber-900 shadow-sm">
-                                            <div className="flex items-start gap-3">
-                                                <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                                                    <Icon icon="solar:bolt-circle-bold" width="18" />
-                                                </div>
-                                                <div>
-                                                    <p className="font-semibold">Live coaching tip</p>
-                                                    <p className="mt-1 text-amber-900/80">{liveTip.tip}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {errorMessage && (
-                                        <div className="mt-6 rounded-[22px] border border-rose-200/40 bg-rose-50/90 px-4 py-3 text-sm text-rose-900 shadow-sm">
-                                            <div className="flex items-start gap-3">
-                                                <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-rose-100 text-rose-700">
-                                                    <Icon icon="solar:danger-circle-bold" width="18" />
-                                                </div>
-                                                <div>
-                                                    <p className="font-semibold">Room issue</p>
-                                                    <p className="mt-1 text-rose-900/80">{errorMessage}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    <div className="mt-8 flex flex-wrap items-center gap-3">
-                                        <button
-                                            onClick={() => void toggleMicrophone()}
-                                            className={`flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition-all ${
-                                                isMicActive ? 'bg-rose-500 text-white hover:bg-rose-600' : 'bg-white text-[#111] hover:bg-neutral-100'
-                                            }`}
-                                        >
-                                            <Icon icon={isMicActive ? 'solar:stop-circle-bold' : 'solar:microphone-3-bold'} width="28" />
-                                        </button>
-
-                                        <div className="rounded-full border border-white/15 bg-white/10 px-4 py-3 text-sm text-white/80">
-                                            {callState === 'idle' && 'Pick a room option first'}
-                                            {callState === 'queueing' && 'Searching for another learner'}
-                                            {callState === 'waiting-link' && 'Share your invite link and wait for them to join'}
-                                            {callState === 'connected' && (isMicActive ? 'Mic live' : 'Room ready for speech')}
-                                            {callState === 'ended' && 'Start again when you are ready'}
-                                        </div>
-
-                                        <button
-                                            onClick={() => setIsMuted((current) => !current)}
-                                            disabled={!roomId}
-                                            className={`flex items-center gap-2 rounded-full border px-5 py-3 text-sm font-medium transition-all ${
-                                                isMuted
-                                                    ? 'border-amber-200 bg-amber-50 text-amber-700'
-                                                    : 'border-white/15 bg-white/10 text-white hover:bg-white/15'
-                                            } ${!roomId ? 'cursor-not-allowed opacity-60' : ''}`}
-                                        >
-                                            <Icon icon={isMuted ? 'solar:microphone-slash-bold' : 'solar:volume-loud-bold'} width="18" />
-                                            {isMuted ? 'Muted' : 'Mute'}
-                                        </button>
-
-                                        <button
-                                            onClick={leaveRoom}
-                                            disabled={!roomId && callState !== 'queueing' && callState !== 'waiting-link'}
-                                            className="flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition-all hover:bg-white/15"
-                                        >
-                                            <Icon icon="solar:phone-bold-duotone" width="18" className="rotate-[135deg]" />
-                                            Leave
-                                        </button>
-                                    </div>
                                 </div>
+                            )}
+
+                            <div className="mt-5 flex items-center gap-3">
+                                {roomId && (
+                                    <button
+                                        onClick={() => setIsMuted((current) => !current)}
+                                        className={`rounded-full border px-4 py-2 text-sm font-medium transition ${
+                                            isMuted
+                                                ? 'border-rose-200 bg-rose-50 text-rose-700'
+                                                : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                                        }`}
+                                    >
+                                        {isMuted ? 'Unmute' : 'Mute'}
+                                    </button>
+                                )}
+                                {feedbackItems[0] && !isAISpeaking && (
+                                    <div className={`rounded-full px-3 py-2 text-sm font-medium ${
+                                        feedbackItems[0].severity === 'red'
+                                            ? 'bg-rose-50 text-rose-700'
+                                            : feedbackItems[0].severity === 'yellow'
+                                                ? 'bg-amber-50 text-amber-700'
+                                                : 'bg-emerald-50 text-emerald-700'
+                                    }`}>
+                                        {feedbackItems[0].severity === 'red' ? 'Pronunciation issue' : feedbackItems[0].severity === 'yellow' ? 'Grammar correction' : 'Pronunciation good'}
+                                    </div>
+                                )}
                             </div>
-
-                            <div className="rounded-[28px] border border-[#e6e0d8] bg-white/75 p-6 shadow-[0_12px_32px_rgba(0,0,0,0.05)]">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">Transcript</p>
-                                        <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Conversation Feed</h2>
-                                    </div>
-                                    <div className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-500">
-                                        {transcripts.length} entries
-                                    </div>
-                                </div>
-
-                                <div className="mt-5 space-y-3">
-                                    {transcripts.length > 0 ? transcripts.map((entry) => (
-                                        <div key={entry.id} className="rounded-[22px] border border-neutral-200 bg-neutral-50/70 px-4 py-3">
-                                            <div className="flex items-center justify-between gap-4">
-                                                <p className="text-sm font-semibold text-[#111]">{entry.speakerLabel}</p>
-                                                <p className="text-xs text-neutral-400">
-                                                    {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                </p>
-                                            </div>
-                                            <p className="mt-2 text-sm leading-relaxed text-neutral-600">{entry.transcript}</p>
-                                        </div>
-                                    )) : (
-                                        <div className="rounded-[22px] border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-8 text-center">
-                                            <p className="text-sm text-neutral-500">Your live transcript will appear here after Gemini processes each turn.</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </section>
-
-                        <aside className="space-y-6">
-                            <div className="rounded-[28px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(245,248,247,0.98)_100%)] p-6 shadow-[0_12px_32px_rgba(0,0,0,0.05)]">
-                                <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">AI Coach</p>
-                                <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Speaker Feedback</h2>
-                                <p className="mt-2 text-sm leading-relaxed text-neutral-500">
-                                    Gemini analyzes your speech privately and returns your transcript, correction, and pronunciation tip here.
-                                </p>
-
-                                <div className="mt-6 space-y-4">
-                                    {primaryFeedback ? (
-                                        <>
-                                            <div className="rounded-[24px] border border-neutral-200 bg-white p-4">
-                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400">Transcript</p>
-                                                <p className="mt-2 text-sm leading-relaxed text-neutral-700">{primaryFeedback.transcript || 'No transcript available yet.'}</p>
-                                            </div>
-                                            <div className="rounded-[24px] border border-emerald-100 bg-emerald-50/80 p-4">
-                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-600">Correction</p>
-                                                <p className="mt-2 text-sm leading-relaxed text-emerald-900">{primaryFeedback.correction || 'Grammar looks good. Keep the sentence flowing naturally.'}</p>
-                                            </div>
-                                            <div className="rounded-[24px] border border-sky-100 bg-sky-50/80 p-4">
-                                                <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-600">Pronunciation tip</p>
-                                                <p className="mt-2 text-sm leading-relaxed text-sky-900">{primaryFeedback.pronunciationTip || 'Keep the rhythm smooth and finish each word clearly.'}</p>
-                                            </div>
-                                        </>
-                                    ) : (
-                                        <div className="rounded-[24px] border border-dashed border-neutral-200 bg-white/75 p-6 text-center">
-                                            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
-                                                <Icon icon="solar:stars-line-duotone" width="24" />
-                                            </div>
-                                            <p className="mt-4 text-sm leading-relaxed text-neutral-500">
-                                                Once the room is connected, tap the mic and start speaking. Gemini will stream coaching here.
-                                            </p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            <div className="rounded-[28px] border border-[#e6e0d8] bg-white/75 p-6 shadow-[0_12px_32px_rgba(0,0,0,0.05)]">
-                                <div className="flex items-center justify-between">
-                                    <div>
-                                        <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">Session Notes</p>
-                                        <h3 className="mt-2 text-xl font-dm-sans font-semibold tracking-tight text-[#111]">Recent coaching</h3>
-                                    </div>
-                                    <Icon icon="solar:chat-round-call-bold-duotone" width="22" className="text-neutral-400" />
-                                </div>
-
-                                <div className="mt-5 space-y-3">
-                                    {feedbackItems.slice(1).map((feedback) => (
-                                        <div key={feedback.createdAt} className="rounded-[22px] border border-neutral-200 bg-neutral-50/70 p-4">
-                                            <p className="text-sm font-semibold text-[#111]">{feedback.transcript || 'Live coaching update'}</p>
-                                            <p className="mt-2 text-sm text-neutral-500">{feedback.pronunciationTip || feedback.correction || 'Keep speaking naturally to receive another tip.'}</p>
-                                        </div>
-                                    ))}
-                                    {feedbackItems.length <= 1 && (
-                                        <div className="rounded-[22px] border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-6 text-center">
-                                            <p className="text-sm text-neutral-500">Coaching history from this room will collect here as you keep speaking.</p>
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        </aside>
+                        </div>
                     </div>
+
+                    <div className="mt-6 grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+                        <div className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 shadow-sm">
+                            <div className="space-y-3">
+                                {liveTranscript && (
+                                    <div className="rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3">
+                                        <div className="flex items-center gap-2 text-sm text-cyan-700">
+                                            <span className="font-medium">{liveTranscript.speakerLabel}</span>
+                                            <span>Live</span>
+                                        </div>
+                                        <p className="mt-2 text-base text-slate-900">{liveTranscript.transcript}</p>
+                                    </div>
+                                )}
+                                {transcripts.length > 0 ? transcripts.map((entry) => (
+                                    <div key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                        <div className="flex items-center gap-2 text-sm text-slate-500">
+                                            <span className="font-medium text-slate-800">{entry.speakerLabel}</span>
+                                            <span>{new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                        </div>
+                                        <p className="mt-2 text-base text-slate-900">{entry.transcript}</p>
+                                    </div>
+                                )) : (
+                                    <p className="px-2 py-3 text-sm text-slate-400">Transcript will appear here while you talk.</p>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="rounded-[26px] border border-slate-200/80 bg-white/90 p-4 shadow-sm">
+                            {feedbackItems[0] ? (
+                                <div className="space-y-3">
+                                    {feedbackItems[0].correction && (
+                                        <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                                            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Correction</p>
+                                            <p className="mt-2 text-base text-slate-900">{feedbackItems[0].correction}</p>
+                                        </div>
+                                    )}
+                                    {feedbackItems[0].pronunciationTip && (
+                                        <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                                            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Pronunciation</p>
+                                            <p className="mt-2 text-base text-slate-900">{feedbackItems[0].pronunciationTip}</p>
+                                        </div>
+                                    )}
+                                    {feedbackItems[0].interruptTip && (
+                                        <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                                            <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Immediate Tip</p>
+                                            <p className="mt-2 text-base text-slate-900">{feedbackItems[0].interruptTip}</p>
+                                        </div>
+                                    )}
+                                    {!feedbackItems[0].correction && !feedbackItems[0].pronunciationTip && !feedbackItems[0].interruptTip && (
+                                        <p className="px-2 py-3 text-sm text-slate-400">The AI coach is listening.</p>
+                                    )}
+                                </div>
+                            ) : (
+                                <p className="px-2 py-3 text-sm text-slate-400">The AI coach will respond when it detects something useful.</p>
+                            )}
+                        </div>
+                    </div>
+
+                    {errorMessage && (
+                        <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                            {errorMessage}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

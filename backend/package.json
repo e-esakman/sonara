@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "node --watch server.ts",
+    "dev": "node scripts/ensure-port.mjs && nodemon --legacy-watch server.ts",
     "start": "node server.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google-cloud/speech": "^6.6.0",
     "@google/genai": "^1.44.0",
     "@types/ws": "^8.18.1",
     "cors": "^2.8.6",

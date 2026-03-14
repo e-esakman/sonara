@@ -74,7 +74,7 @@ async function fetchWithRetry(
 }
 
 // ─── Minimum Word Validation ─────────────────────────────────────
-const MIN_WORDS_FOR_ANALYSIS = 4;
+const MIN_WORDS_FOR_ANALYSIS = 1;
 
 export const analyzePronunciation = async (
     expectedText: string,
@@ -93,9 +93,9 @@ export const analyzePronunciation = async (
             wordAnalysis: [],
             wordScores: [],
             phoneticBreakdown: {},
-            tips: ['Please read a full sentence or phrase for accurate pronunciation analysis.'],
-            suggestions: ['Try reading at least 4–5 words so the AI can evaluate your pronunciation properly.'],
-            coachMessage: 'Say a longer sentence so I can give pronunciation coaching.',
+            tips: ['Say at least one clear word so the AI can evaluate your pronunciation.'],
+            suggestions: ['Try a short phrase if you want more detailed pronunciation coaching.'],
+            coachMessage: 'Say a word or short phrase so I can give pronunciation coaching.',
             speakCorrectWords: [],
         };
     }

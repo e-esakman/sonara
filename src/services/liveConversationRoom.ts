@@ -23,15 +23,41 @@ export type TranscriptEntry = {
     createdAt: string;
 };
 
+export type LiveTranscriptPayload = {
+    roomId: string;
+    transcript: string;
+    isFinal: boolean;
+    speakerRole: 'userA' | 'userB';
+    speakerLabel: string;
+    createdAt: string;
+};
+
+export type UserPresencePayload = {
+    roomId: string;
+    participants: Array<{ role: 'userA' | 'userB'; label: string }>;
+};
+
+export type UserLeftPayload = {
+    roomId: string;
+    speakerLabel: string;
+};
+
+export type UserConnectedPayload = {
+    title: string;
+    message: string;
+};
+
+export type ClientTranscriptPayload = {
+    transcript: string;
+};
+
 export type AIFeedback = {
     transcript: string;
     correction: string;
     pronunciationTip: string;
-    createdAt: string;
-};
-
-export type AITip = {
-    tip: string;
+    interruptTip: string;
+    severity: 'green' | 'yellow' | 'red';
+    speechText: string;
     createdAt: string;
 };
 

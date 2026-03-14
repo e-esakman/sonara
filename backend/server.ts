@@ -11,10 +11,11 @@ import { setupLiveProxy } from './liveProxy.ts';
 import { setupConversationRoomServer } from './rooms/liveConversationServer.ts';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT || 3000);
+const host = process.env.HOST || '::';
 
 const allowedOrigins = new Set(
-    (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173')
+    (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173,http://127.0.0.1:5173')
         .split(',')
         .map(o => o.trim())
         .filter(Boolean)
@@ -49,6 +50,16 @@ const server = http.createServer(app);
 setupLiveProxy(server);
 setupConversationRoomServer(server, Array.from(allowedOrigins));
 
-server.listen(port, () => {
-    console.log(`Sonara backend listening at http://localhost:${port}`);
+server.on('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE') {
+        console.error(`Port ${port} is already in use. Stop the other process and retry.`);
+        process.exit(0);
+    } else {
+        console.error('Server failed to start', error);
+        process.exit(1);
+    }
+});
+
+server.listen(port, host, () => {
+    console.log(`Sonara backend listening at http://${host}:${port}`);
 });

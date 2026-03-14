@@ -1,7 +1,9 @@
 import { randomUUID } from 'crypto';
 import type { Server as HttpServer } from 'http';
+import { SpeechClient } from '@google-cloud/speech';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { Server as SocketIOServer, Socket } from 'socket.io';
+import { processSpeech } from '../agents/speechProcessor.ts';
 
 type SpeakerRole = 'userA' | 'userB';
 
@@ -21,6 +23,8 @@ type AIFeedback = {
     interruptTip: string;
 };
 
+type FeedbackSeverity = 'green' | 'yellow' | 'red';
+
 type Participant = {
     socketId: string;
     label: string;
@@ -34,17 +38,28 @@ type ClientAudioPayload = {
     mediaMimeType?: string;
 };
 
+type ClientTranscriptPayload = {
+    transcript?: string;
+};
+
 type RoomState = {
     roomId: string;
     userA: Participant;
     userB: Participant | null;
     geminiSessionA: SpeakerSession | null;
     geminiSessionB: SpeakerSession | null;
-    audioBufferA: string[];
-    audioBufferB: string[];
+    sttStreamA: ReturnType<SpeechClient['streamingRecognize']> | null;
+    sttStreamB: ReturnType<SpeechClient['streamingRecognize']> | null;
+    transcriptBufferA: string[];
+    transcriptBufferB: string[];
+    analysisTimerA: NodeJS.Timeout | null;
+    analysisTimerB: NodeJS.Timeout | null;
+    turnTimerA: NodeJS.Timeout | null;
+    turnTimerB: NodeJS.Timeout | null;
     lastTranscriptA: string;
     lastTranscriptB: string;
-    createdFrom: 'queue' | 'invite';
+    lastFeedbackA: string;
+    lastFeedbackB: string;
 };
 
 type LiveSession = {
@@ -52,48 +67,65 @@ type LiveSession = {
     close: () => void;
 };
 
-const COACH_INSTRUCTION = `You are Sonara's live conversation coach for one speaker in a two-person room.
+const COACH_INSTRUCTION = `You are an AI pronunciation coach inside a live voice conversation application.
 
-Listen to the speaker's audio and respond only with compact JSON using this exact shape:
-{"transcript":"","correction":"","pronunciationTip":"","interruptTip":""}
-
-Rules:
-- transcript: the speaker's spoken English, cleaned up and readable
-- correction: grammar correction, or empty string if the grammar is already good
-- pronunciationTip: one short pronunciation coaching tip, or empty string
-- interruptTip: a very short immediate coaching cue only when there is a mistake worth interrupting for, otherwise empty string
-- Never include markdown
-- Never include extra keys
-- Keep every field concise`;
-
-const LIVE_MODEL = 'gemini-2.5-flash-native-audio-preview-12-2025';
-
-const TRANSCRIPTION_PROMPT = `You are Sonara's conversation coach.
-
-Analyze the provided spoken English audio and return compact JSON with this exact shape:
-{"transcript":"","correction":"","pronunciationTip":"","interruptTip":""}
+Return ONLY valid JSON using this exact format:
+{
+  "transcript": "clean sentence transcript",
+  "correction": "grammar fix or cleaned sentence",
+  "pronunciationTip": "short pronunciation coaching",
+  "interruptTip": "very short immediate correction"
+}
 
 Rules:
-- transcript: what the speaker said, cleaned up and readable
-- correction: the corrected grammar, or empty string if grammar is already good
-- pronunciationTip: one short pronunciation tip, or empty string
-- interruptTip: keep empty string for this offline turn analysis
-- return valid JSON only`;
+- The application sends short speech segments.
+- Keep every field short and direct.
+- No markdown.
+- No extra keys.
+- transcript must be readable and cleaned of filler words.
+- correction should be the exact sentence the user should repeat, or empty if not needed.
+- pronunciationTip should be short, direct, and instructional.
+- interruptTip should be immediate and imperative, for example "Pronounce: working."
+- If speech is already clear, leave correction, pronunciationTip, and interruptTip empty.`;
+
+const ANALYSIS_PROMPT = `Analyze the transcript and return ONLY valid JSON with this exact shape:
+{
+  "transcript": "clean sentence transcript",
+  "correction": "grammar fix or cleaned sentence",
+  "pronunciationTip": "short pronunciation coaching",
+  "interruptTip": "very short immediate correction"
+}
+
+Rules:
+- No markdown.
+- No extra keys.
+- Keep responses concise.
+- correction should be a direct sentence to repeat.
+- pronunciationTip must be short and direct.
+- interruptTip must be very short and imperative.
+- If the sentence is already clear, keep coaching fields empty.`;
+
+const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest';
+const ANALYSIS_MODEL = process.env.GEMINI_ANALYSIS_MODEL || 'gemini-2.5-flash';
+const STT_LANGUAGE = process.env.STT_LANGUAGE || 'en-US';
 
 class SpeakerSession {
     private session: LiveSession | null = null;
     private buffer = '';
     private readonly ai: GoogleGenAI;
     private readonly onFeedback: (feedback: AIFeedback) => void;
+    private readonly onLiveTranscript: (transcript: string, isFinal: boolean) => void;
     private readonly onStatus: (status: string) => void;
 
     constructor(
         ai: GoogleGenAI,
         onFeedback: (feedback: AIFeedback) => void,
+        onLiveTranscript: (transcript: string, isFinal: boolean) => void,
         onStatus: (status: string) => void,
     ) {
         this.ai = ai;
         this.onFeedback = onFeedback;
+        this.onLiveTranscript = onLiveTranscript;
         this.onStatus = onStatus;
     }
 
@@ -123,11 +155,9 @@ class SpeakerSession {
                     },
                 },
                 config: {
-                    responseModalities: [Modality.AUDIO],
+                    responseModalities: [Modality.TEXT],
                     inputAudioTranscription: {},
-                    systemInstruction: {
-                        parts: [{ text: COACH_INSTRUCTION }],
-                    },
+                    systemInstruction: { parts: [{ text: COACH_INSTRUCTION }] },
                 },
             }) as unknown as LiveSession;
         } catch (error) {
@@ -190,16 +220,10 @@ class SpeakerSession {
     }) {
         const inputTranscript = message.serverContent?.inputTranscription?.text?.trim();
         if (inputTranscript) {
-            this.onFeedback({
-                transcript: inputTranscript,
-                correction: '',
-                pronunciationTip: '',
-                interruptTip: '',
-            });
+            this.onLiveTranscript(inputTranscript, Boolean(message.serverContent?.turnComplete));
         }
 
         const parts = message.serverContent?.modelTurn?.parts ?? [];
-
         for (const part of parts) {
             if (!part.text) {
                 continue;
@@ -226,17 +250,20 @@ class SpeakerSession {
         }
 
         try {
-            const parsed = JSON.parse(text.slice(start, end + 1)) as Partial<AIFeedback>;
-            return {
-                transcript: parsed.transcript?.trim() ?? '',
-                correction: parsed.correction?.trim() ?? '',
-                pronunciationTip: parsed.pronunciationTip?.trim() ?? '',
-                interruptTip: parsed.interruptTip?.trim() ?? '',
-            };
+            return normalizeFeedback(JSON.parse(text.slice(start, end + 1)) as Partial<AIFeedback>);
         } catch {
             return null;
         }
     }
+}
+
+function normalizeFeedback(feedback: Partial<AIFeedback>): AIFeedback {
+    return {
+        transcript: feedback.transcript?.trim() ?? '',
+        correction: feedback.correction?.trim() ?? '',
+        pronunciationTip: feedback.pronunciationTip?.trim() ?? '',
+        interruptTip: feedback.interruptTip?.trim() ?? '',
+    };
 }
 
 export function setupConversationRoomServer(server: HttpServer, allowedOrigins: string[]) {
@@ -247,10 +274,11 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
         },
     });
 
+    const speechClient = process.env.GOOGLE_APPLICATION_CREDENTIALS ? new SpeechClient() : null;
     const apiKey = process.env.GEMINI_LIVEVOICE_KEY || process.env.GEMINI_API_KEY;
     const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
     const frontendBaseUrl = process.env.FRONTEND_URL || allowedOrigins[0] || 'http://localhost:5173';
-    const waitingQueue: Participant[] = [];
+    const useGeminiTranscription = process.env.USE_GEMINI_TRANSCRIPTION !== '0';
     const rooms = new Map<string, RoomState>();
     const roomBySocket = new Map<string, string>();
 
@@ -273,15 +301,64 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
     const getParticipant = (room: RoomState, role: SpeakerRole) => (role === 'userA' ? room.userA : room.userB);
 
     const getPartner = (room: RoomState, socketId: string) => {
-        if (room.userA.socketId === socketId) return room.userB;
+        if (room.userA.socketId === socketId) {
+            return room.userB;
+        }
         return room.userA;
     };
 
-    const removeFromQueue = (socketId: string) => {
-        const index = waitingQueue.findIndex((participant) => participant.socketId === socketId);
-        if (index >= 0) {
-            waitingQueue.splice(index, 1);
+    const getFeedbackSeverity = (feedback: AIFeedback): FeedbackSeverity => {
+        if (feedback.interruptTip || feedback.pronunciationTip) {
+            return 'red';
         }
+        if (feedback.correction && feedback.correction !== feedback.transcript) {
+            return 'yellow';
+        }
+        return 'green';
+    };
+
+    const buildSpeechText = (feedback: AIFeedback) => {
+        const lines: string[] = [];
+
+        if (feedback.interruptTip) {
+            lines.push(feedback.interruptTip);
+        }
+        if (feedback.correction && feedback.correction !== feedback.transcript) {
+            lines.push(`Say: ${feedback.correction}`);
+        }
+        if (feedback.pronunciationTip) {
+            lines.push(feedback.pronunciationTip.startsWith('Pronounce:')
+                ? feedback.pronunciationTip
+                : `Pronounce: ${feedback.pronunciationTip}`);
+        }
+
+        return lines.join(' ');
+    };
+
+    const emitFeedback = (room: RoomState, role: SpeakerRole, feedback: AIFeedback) => {
+        const participant = getParticipant(room, role);
+        if (!participant) {
+            return;
+        }
+
+        const socket = io.sockets.sockets.get(participant.socketId);
+        if (!socket) {
+            return;
+        }
+
+        const feedbackKey = role === 'userA' ? 'lastFeedbackA' : 'lastFeedbackB';
+        const fingerprint = JSON.stringify(feedback);
+        if (room[feedbackKey] === fingerprint) {
+            return;
+        }
+        room[feedbackKey] = fingerprint;
+
+        socket.emit('ai-feedback', {
+            ...feedback,
+            severity: getFeedbackSeverity(feedback),
+            speechText: buildSpeechText(feedback),
+            createdAt: new Date().toISOString(),
+        });
     };
 
     const emitTranscript = (room: RoomState, role: SpeakerRole, transcript: string) => {
@@ -308,7 +385,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
         io.to(room.roomId).emit('transcript-entry', entry);
     };
 
-    const closeRoom = (roomId: string, departingSocketId?: string) => {
+    const cleanupRoom = (roomId: string) => {
         const room = rooms.get(roomId);
         if (!room) {
             return;
@@ -316,19 +393,191 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
 
         room.geminiSessionA?.close();
         room.geminiSessionB?.close();
+        room.sttStreamA?.destroy();
+        room.sttStreamB?.destroy();
+        if (room.analysisTimerA) clearTimeout(room.analysisTimerA);
+        if (room.analysisTimerB) clearTimeout(room.analysisTimerB);
+        if (room.turnTimerA) clearTimeout(room.turnTimerA);
+        if (room.turnTimerB) clearTimeout(room.turnTimerB);
 
         rooms.delete(roomId);
         roomBySocket.delete(room.userA.socketId);
         if (room.userB) {
             roomBySocket.delete(room.userB.socketId);
         }
+    };
 
-        if (departingSocketId) {
-            const partner = getPartner(room, departingSocketId);
-            if (partner) {
-                io.to(partner.socketId).emit('room-ended', { message: 'Your partner left the room' });
-            }
+    const clearSpeakerState = (room: RoomState, role: SpeakerRole) => {
+        if (role === 'userA') {
+            room.geminiSessionA?.close();
+            room.geminiSessionA = null;
+            room.sttStreamA?.destroy();
+            room.sttStreamA = null;
+            if (room.analysisTimerA) clearTimeout(room.analysisTimerA);
+            if (room.turnTimerA) clearTimeout(room.turnTimerA);
+            room.analysisTimerA = null;
+            room.turnTimerA = null;
+            room.transcriptBufferA = [];
+            room.lastTranscriptA = '';
+            room.lastFeedbackA = '';
+            return;
         }
+
+        room.geminiSessionB?.close();
+        room.geminiSessionB = null;
+        room.sttStreamB?.destroy();
+        room.sttStreamB = null;
+        if (room.analysisTimerB) clearTimeout(room.analysisTimerB);
+        if (room.turnTimerB) clearTimeout(room.turnTimerB);
+        room.analysisTimerB = null;
+        room.turnTimerB = null;
+        room.transcriptBufferB = [];
+        room.lastTranscriptB = '';
+        room.lastFeedbackB = '';
+    };
+
+    const promoteUserBToUserA = (room: RoomState) => {
+        if (!room.userB) {
+            return;
+        }
+
+        room.userA = room.userB;
+        room.userA.role = 'userA';
+        room.userB = null;
+        room.geminiSessionA = room.geminiSessionB;
+        room.geminiSessionB = null;
+        room.sttStreamA = room.sttStreamB;
+        room.sttStreamB = null;
+        room.transcriptBufferA = room.transcriptBufferB;
+        room.transcriptBufferB = [];
+        room.analysisTimerA = room.analysisTimerB;
+        room.analysisTimerB = null;
+        room.turnTimerA = room.turnTimerB;
+        room.turnTimerB = null;
+        room.lastTranscriptA = room.lastTranscriptB;
+        room.lastTranscriptB = '';
+        room.lastFeedbackA = room.lastFeedbackB;
+        room.lastFeedbackB = '';
+    };
+
+    const closeRoom = (roomId: string, departingSocketId?: string) => {
+        const room = rooms.get(roomId);
+        if (!room) {
+            return;
+        }
+
+        const role = departingSocketId ? getRole(room, departingSocketId) : null;
+        if (!departingSocketId || !role) {
+            cleanupRoom(roomId);
+            return;
+        }
+
+        roomBySocket.delete(departingSocketId);
+
+        if (role === 'userB') {
+            clearSpeakerState(room, 'userB');
+            room.userB = null;
+        } else if (room.userB) {
+            clearSpeakerState(room, 'userA');
+            promoteUserBToUserA(room);
+        } else {
+            cleanupRoom(roomId);
+            return;
+        }
+
+        const remainingSocket = io.sockets.sockets.get(room.userA.socketId);
+        if (!remainingSocket) {
+            cleanupRoom(roomId);
+            return;
+        }
+
+        remainingSocket.join(room.roomId);
+        remainingSocket.emit('room-ended', { message: 'Your partner left the conversation' });
+        remainingSocket.emit('user-left', {
+            roomId,
+            speakerLabel: 'Partner',
+        });
+        remainingSocket.emit('room-ready', {
+            roomId: room.roomId,
+            role: 'userA',
+            selfLabel: room.userA.label,
+            partnerLabel: 'Waiting for join',
+        });
+        io.to(room.roomId).emit('call-status', { status: 'Waiting for another speaker...' });
+    };
+
+    const emitLiveTranscript = (room: RoomState, role: SpeakerRole, transcript: string, isFinal: boolean) => {
+        const speaker = getParticipant(room, role);
+        io.to(room.roomId).emit('live-transcript', {
+            roomId: room.roomId,
+            transcript,
+            isFinal,
+            speakerRole: role,
+            speakerLabel: speaker?.label || (role === 'userA' ? 'User A' : 'User B'),
+            createdAt: new Date().toISOString(),
+        });
+    };
+
+    const handleTranscript = (room: RoomState, role: SpeakerRole, transcript: string, isFinal: boolean) => {
+        const clean = transcript.trim();
+        if (!clean) {
+            return;
+        }
+
+        emitLiveTranscript(room, role, clean, isFinal);
+
+        if (!isFinal) {
+            return;
+        }
+
+        emitTranscript(room, role, clean);
+        const buffer = getTranscriptBuffer(room, role);
+        setTranscriptBuffer(room, role, [...buffer, clean]);
+        scheduleAnalysis(room, role);
+    };
+
+    const getTranscriptBuffer = (room: RoomState, role: SpeakerRole) =>
+        role === 'userA' ? room.transcriptBufferA : room.transcriptBufferB;
+
+    const setTranscriptBuffer = (room: RoomState, role: SpeakerRole, segments: string[]) => {
+        if (role === 'userA') {
+            room.transcriptBufferA = segments;
+            return;
+        }
+        room.transcriptBufferB = segments;
+    };
+
+    const getAnalysisTimer = (room: RoomState, role: SpeakerRole) =>
+        role === 'userA' ? room.analysisTimerA : room.analysisTimerB;
+
+    const setAnalysisTimer = (room: RoomState, role: SpeakerRole, timer: NodeJS.Timeout | null) => {
+        if (role === 'userA') {
+            room.analysisTimerA = timer;
+            return;
+        }
+        room.analysisTimerB = timer;
+    };
+
+    const getTurnTimer = (room: RoomState, role: SpeakerRole) =>
+        role === 'userA' ? room.turnTimerA : room.turnTimerB;
+
+    const setTurnTimer = (room: RoomState, role: SpeakerRole, timer: NodeJS.Timeout | null) => {
+        if (role === 'userA') {
+            room.turnTimerA = timer;
+            return;
+        }
+        room.turnTimerB = timer;
+    };
+
+    const getSttStream = (room: RoomState, role: SpeakerRole) =>
+        role === 'userA' ? room.sttStreamA : room.sttStreamB;
+
+    const setSttStream = (room: RoomState, role: SpeakerRole, stream: ReturnType<SpeechClient['streamingRecognize']> | null) => {
+        if (role === 'userA') {
+            room.sttStreamA = stream;
+            return;
+        }
+        room.sttStreamB = stream;
     };
 
     const createSpeakerSession = async (room: RoomState, role: SpeakerRole) => {
@@ -348,24 +597,12 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 socket.emit('room-debug', {
                     type: 'gemini-transcript',
                     transcript: feedback.transcript,
-                    hasCorrection: Boolean(feedback.correction),
-                    hasPronunciationTip: Boolean(feedback.pronunciationTip),
                     createdAt: new Date().toISOString(),
                 });
-                emitTranscript(room, role, feedback.transcript);
-                socket.emit('ai-feedback', {
-                    transcript: feedback.transcript,
-                    correction: feedback.correction,
-                    pronunciationTip: feedback.pronunciationTip,
-                    createdAt: new Date().toISOString(),
-                });
-
-                if (feedback.interruptTip) {
-                    socket.emit('ai-tip', {
-                        tip: feedback.interruptTip,
-                        createdAt: new Date().toISOString(),
-                    });
-                }
+                emitFeedback(room, role, feedback);
+            },
+            (transcript, isFinal) => {
+                handleTranscript(room, role, transcript, isFinal);
             },
             (status) => {
                 socket.emit('room-debug', {
@@ -381,48 +618,18 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
         return session;
     };
 
-    const getAudioBuffer = (room: RoomState, role: SpeakerRole) => (role === 'userA' ? room.audioBufferA : room.audioBufferB);
-
-    const setAudioBuffer = (room: RoomState, role: SpeakerRole, chunks: string[]) => {
-        if (role === 'userA') {
-            room.audioBufferA = chunks;
-        } else {
-            room.audioBufferB = chunks;
+    const ensureSpeakerSession = async (room: RoomState, role: SpeakerRole) => {
+        const key = role === 'userA' ? 'geminiSessionA' : 'geminiSessionB';
+        let session = room[key];
+        if (!session) {
+            session = await createSpeakerSession(room, role);
+            room[key] = session;
         }
+        return session;
     };
 
-    const decodeBase64 = (base64: string) => Buffer.from(base64, 'base64');
-
-    const pcmChunksToWavBase64 = (chunks: string[]) => {
-        const pcmBuffers = chunks.map(decodeBase64);
-        const pcmData = Buffer.concat(pcmBuffers);
-        const header = Buffer.alloc(44);
-        const sampleRate = 16000;
-        const channels = 1;
-        const bitsPerSample = 16;
-        const byteRate = sampleRate * channels * (bitsPerSample / 8);
-        const blockAlign = channels * (bitsPerSample / 8);
-
-        header.write('RIFF', 0);
-        header.writeUInt32LE(36 + pcmData.length, 4);
-        header.write('WAVE', 8);
-        header.write('fmt ', 12);
-        header.writeUInt32LE(16, 16);
-        header.writeUInt16LE(1, 20);
-        header.writeUInt16LE(channels, 22);
-        header.writeUInt32LE(sampleRate, 24);
-        header.writeUInt32LE(byteRate, 28);
-        header.writeUInt16LE(blockAlign, 32);
-        header.writeUInt16LE(bitsPerSample, 34);
-        header.write('data', 36);
-        header.writeUInt32LE(pcmData.length, 40);
-
-        return Buffer.concat([header, pcmData]).toString('base64');
-    };
-
-    const analyzeBufferedAudio = async (room: RoomState, role: SpeakerRole) => {
-        const chunks = getAudioBuffer(room, role);
-        if (!ai || chunks.length === 0) {
+    const analyzeTranscriptText = async (room: RoomState, role: SpeakerRole, transcript: string) => {
+        if (!ai || !transcript) {
             return;
         }
 
@@ -443,20 +650,14 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 createdAt: new Date().toISOString(),
             });
 
-            const wavBase64 = pcmChunksToWavBase64(chunks);
             const response = await ai.models.generateContent({
-                model: 'gemini-3-flash-preview',
+                model: ANALYSIS_MODEL,
                 contents: [
                     {
                         role: 'user',
                         parts: [
-                            { text: TRANSCRIPTION_PROMPT },
-                            {
-                                inlineData: {
-                                    data: wavBase64,
-                                    mimeType: 'audio/wav',
-                                },
-                            },
+                            { text: ANALYSIS_PROMPT },
+                            { text: `Transcript:\n${transcript}` },
                         ],
                     },
                 ],
@@ -470,71 +671,99 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             const start = text.indexOf('{');
             const end = text.lastIndexOf('}');
             const parsed = JSON.parse(start !== -1 && end !== -1 ? text.slice(start, end + 1) : text) as Partial<AIFeedback>;
-            const feedback: AIFeedback = {
-                transcript: parsed.transcript?.trim() ?? '',
-                correction: parsed.correction?.trim() ?? '',
-                pronunciationTip: parsed.pronunciationTip?.trim() ?? '',
-                interruptTip: '',
-            };
+            const feedback = normalizeFeedback(parsed);
 
-            if (feedback.transcript || feedback.correction || feedback.pronunciationTip) {
-                socket.emit('room-debug', {
-                    type: 'gemini-transcript',
-                    transcript: feedback.transcript,
-                    hasCorrection: Boolean(feedback.correction),
-                    hasPronunciationTip: Boolean(feedback.pronunciationTip),
-                    createdAt: new Date().toISOString(),
-                });
+            emitFeedback(room, role, {
+                ...feedback,
+                transcript: feedback.transcript || transcript,
+            });
 
-                emitTranscript(room, role, feedback.transcript);
-                socket.emit('ai-feedback', {
-                    transcript: feedback.transcript,
-                    correction: feedback.correction,
-                    pronunciationTip: feedback.pronunciationTip,
-                    createdAt: new Date().toISOString(),
-                });
-                socket.emit('room-debug', {
-                    type: 'gemini-status',
-                    status: 'Transcript ready',
-                    createdAt: new Date().toISOString(),
-                });
-            } else {
-                socket.emit('room-debug', {
-                    type: 'gemini-status',
-                    status: 'No transcript returned',
-                    createdAt: new Date().toISOString(),
-                });
-            }
+            socket.emit('room-debug', {
+                type: 'gemini-status',
+                status: 'Transcript ready',
+                createdAt: new Date().toISOString(),
+            });
         } catch (error) {
-            console.error('[ConversationRoom] Failed to analyze buffered audio', error);
+            console.error('[ConversationRoom] Failed to analyze transcript', error);
             socket.emit('room-debug', {
                 type: 'gemini-status',
                 status: 'Gemini analysis failed',
                 createdAt: new Date().toISOString(),
             });
-        } finally {
-            setAudioBuffer(room, role, []);
         }
     };
 
-    const ensureSpeakerSession = async (room: RoomState, role: SpeakerRole) => {
-        const key = role === 'userA' ? 'geminiSessionA' : 'geminiSessionB';
-        let session = room[key];
-        if (!session) {
-            session = await createSpeakerSession(room, role);
-            room[key] = session;
-        }
-        return session;
-    };
-
-    const finalizeRoom = async (room: RoomState) => {
-        if (!room.userB) {
+    const scheduleAnalysis = (room: RoomState, role: SpeakerRole) => {
+        if (getAnalysisTimer(room, role)) {
             return;
         }
 
+        const timer = setTimeout(async () => {
+            setAnalysisTimer(room, role, null);
+            const buffer = getTranscriptBuffer(room, role);
+            if (buffer.length === 0) {
+                return;
+            }
+
+            setTranscriptBuffer(room, role, []);
+            const combined = buffer.join(' ').trim();
+            if (!combined) {
+                return;
+            }
+
+            const processed = processSpeech(combined);
+            const cleanText = processed.tokens.join(' ').trim();
+            await analyzeTranscriptText(room, role, cleanText || combined);
+        }, 1000);
+
+        setAnalysisTimer(room, role, timer);
+    };
+
+    const ensureSttStream = (room: RoomState, role: SpeakerRole) => {
+        if (!speechClient) {
+            return null;
+        }
+
+        const existing = getSttStream(room, role);
+        if (existing) {
+            return existing;
+        }
+
+        const stream = speechClient.streamingRecognize({
+            config: {
+                encoding: 'LINEAR16',
+                sampleRateHertz: 16000,
+                languageCode: STT_LANGUAGE,
+                enableAutomaticPunctuation: true,
+                model: 'latest_long',
+            },
+            interimResults: true,
+            singleUtterance: false,
+        });
+
+        stream.on('data', (data) => {
+            const result = data.results?.[0];
+            const transcript = result?.alternatives?.[0]?.transcript?.trim();
+            if (!transcript) {
+                return;
+            }
+
+            const isFinal = Boolean(result?.isFinal);
+            handleTranscript(room, role, transcript, isFinal);
+        });
+
+        stream.on('error', (error) => {
+            console.error('[ConversationRoom] STT stream error', error);
+            setSttStream(room, role, null);
+        });
+
+        setSttStream(room, role, stream);
+        return stream;
+    };
+
+    const finalizeRoom = async (room: RoomState) => {
         const firstSocket = io.sockets.sockets.get(room.userA.socketId);
-        const secondSocket = io.sockets.sockets.get(room.userB.socketId);
-        if (!firstSocket || !secondSocket) {
+        if (!firstSocket) {
             return;
         }
 
@@ -542,25 +771,52 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             roomId: room.roomId,
             role: 'userA',
             selfLabel: room.userA.label,
-            partnerLabel: room.userB.label,
-        });
-        secondSocket.emit('room-ready', {
-            roomId: room.roomId,
-            role: 'userB',
-            selfLabel: room.userB.label,
-            partnerLabel: room.userA.label,
+            partnerLabel: room.userB?.label ?? 'Waiting for join',
         });
 
-        io.to(room.roomId).emit('call-status', { status: 'Connected' });
-
-        if (!ai) {
-            io.to(room.roomId).emit('coach-status', { status: 'Gemini API key missing' });
-            return;
+        if (room.userB) {
+            const secondSocket = io.sockets.sockets.get(room.userB.socketId);
+            secondSocket?.emit('room-ready', {
+                roomId: room.roomId,
+                role: 'userB',
+                selfLabel: room.userB.label,
+                partnerLabel: room.userA.label,
+            });
         }
-        io.to(room.roomId).emit('coach-status', { status: 'Coach standing by' });
+
+        io.to(room.roomId).emit('call-status', { status: room.userB ? 'Connected' : 'Invite link ready. Waiting for your friend...' });
+        io.to(room.roomId).emit('coach-status', { status: ai ? 'Coach standing by' : 'Gemini API key missing' });
+
+        if (ai) {
+            await ensureSpeakerSession(room, 'userA');
+            if (room.userB) {
+                await ensureSpeakerSession(room, 'userB');
+            }
+        }
+
+        io.to(room.roomId).emit('user-joined', {
+            roomId: room.roomId,
+            participants: [
+                { role: 'userA', label: room.userA.label },
+                ...(room.userB ? [{ role: 'userB' as const, label: room.userB.label }] : []),
+            ],
+        });
+
+        if (room.userB) {
+            firstSocket.emit('user-connected', {
+                title: 'Speaker connected',
+                message: 'You can start talking',
+            });
+
+            const secondSocket = io.sockets.sockets.get(room.userB.socketId);
+            secondSocket?.emit('user-connected', {
+                title: 'Connected to room host',
+                message: 'Start speaking',
+            });
+        }
     };
 
-    const createRoom = (creator: Participant, createdFrom: 'queue' | 'invite') => {
+    const createRoom = (creator: Participant) => {
         const roomId = `room-${randomUUID()}`;
         const room: RoomState = {
             roomId,
@@ -568,52 +824,35 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             userB: null,
             geminiSessionA: null,
             geminiSessionB: null,
-            audioBufferA: [],
-            audioBufferB: [],
+            sttStreamA: null,
+            sttStreamB: null,
+            transcriptBufferA: [],
+            transcriptBufferB: [],
+            analysisTimerA: null,
+            analysisTimerB: null,
+            turnTimerA: null,
+            turnTimerB: null,
             lastTranscriptA: '',
             lastTranscriptB: '',
-            createdFrom,
+            lastFeedbackA: '',
+            lastFeedbackB: '',
         };
+
         rooms.set(roomId, room);
         roomBySocket.set(creator.socketId, roomId);
         return room;
     };
 
     io.on('connection', (socket: Socket) => {
-        socket.emit('call-status', { status: 'Ready to join queue' });
+        socket.emit('call-status', { status: 'Ready to start a call' });
 
-        socket.on('join-queue', async ({ name }: { name?: string } = {}) => {
+        socket.on('start-call', async ({ name }: { name?: string } = {}) => {
             if (roomBySocket.has(socket.id)) {
                 return;
             }
 
-            socket.data.displayName = name?.trim() || socket.data.displayName || 'Guest';
-            removeFromQueue(socket.id);
-
-            const waitingPartner = waitingQueue.shift();
-            if (!waitingPartner) {
-                waitingQueue.push(makeParticipant(socket, 'userA', socket.data.displayName));
-                socket.emit('queue-status', { status: 'Waiting for a partner...' });
-                return;
-            }
-
-            const room = createRoom(waitingPartner, 'queue');
-            room.userB = makeParticipant(socket, 'userB', socket.data.displayName);
-            io.sockets.sockets.get(waitingPartner.socketId)?.join(room.roomId);
-            socket.join(room.roomId);
-            roomBySocket.set(room.userB.socketId, room.roomId);
-            await finalizeRoom(room);
-        });
-
-        socket.on('create-invite-room', ({ name }: { name?: string } = {}) => {
-            if (roomBySocket.has(socket.id)) {
-                return;
-            }
-
-            socket.data.displayName = name?.trim() || socket.data.displayName || 'Host';
-            removeFromQueue(socket.id);
-
-            const room = createRoom(makeParticipant(socket, 'userA', socket.data.displayName), 'invite');
+            socket.data.displayName = name?.trim() || 'Host';
+            const room = createRoom(makeParticipant(socket, 'userA', socket.data.displayName));
             socket.join(room.roomId);
             socket.emit('invite-room-created', {
                 roomId: room.roomId,
@@ -621,7 +860,29 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 role: 'userA',
                 selfLabel: room.userA.label,
             });
-            socket.emit('call-status', { status: 'Invite link ready. Waiting for your friend...' });
+            await finalizeRoom(room);
+        });
+
+        socket.on('create-invite-room', async ({ name }: { name?: string } = {}) => {
+            socket.emit('room-debug', {
+                type: 'gemini-status',
+                status: 'Legacy event redirected to start-call',
+                createdAt: new Date().toISOString(),
+            });
+            if (roomBySocket.has(socket.id)) {
+                return;
+            }
+
+            socket.data.displayName = name?.trim() || 'Host';
+            const room = createRoom(makeParticipant(socket, 'userA', socket.data.displayName));
+            socket.join(room.roomId);
+            socket.emit('invite-room-created', {
+                roomId: room.roomId,
+                shareUrl: `${frontendBaseUrl}/rooms?room=${encodeURIComponent(room.roomId)}`,
+                role: 'userA',
+                selfLabel: room.userA.label,
+            });
+            await finalizeRoom(room);
         });
 
         socket.on('join-room', async ({ roomId, name }: { roomId?: string; name?: string } = {}) => {
@@ -640,14 +901,12 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 return;
             }
 
-            if (room.userB && room.userB.socketId !== socket.id) {
-                emitRoomError(socket, 'This room already has two people.');
+            if (room.userB) {
+                socket.emit('room-full', { roomId, message: 'This call already has two people.' });
                 return;
             }
 
-            socket.data.displayName = name?.trim() || socket.data.displayName || 'Guest';
-            removeFromQueue(socket.id);
-
+            socket.data.displayName = name?.trim() || 'Guest';
             room.userB = makeParticipant(socket, 'userB', socket.data.displayName);
             roomBySocket.set(socket.id, room.roomId);
             socket.join(room.roomId);
@@ -682,19 +941,49 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 return;
             }
 
-            const mimeType = payload.pcmMimeType ?? 'audio/pcm;rate=16000';
-            setAudioBuffer(room, role, [...getAudioBuffer(room, role), payload.pcmData]);
-            const session = await ensureSpeakerSession(room, role);
             socket.emit('room-debug', {
                 type: 'audio-sent',
                 createdAt: new Date().toISOString(),
             });
-            const sent = session?.sendAudio(payload.pcmData, mimeType);
-            if (sent) {
+
+            if (useGeminiTranscription || !speechClient) {
+                const session = await ensureSpeakerSession(room, role);
+                const forwarded = session?.sendAudio(payload.pcmData, payload.pcmMimeType ?? 'audio/pcm;rate=16000');
+                if (forwarded) {
+                    socket.emit('room-debug', {
+                        type: 'gemini-audio-received',
+                        createdAt: new Date().toISOString(),
+                    });
+                }
+
+                if (forwarded && !getTurnTimer(room, role)) {
+                    const timer = setTimeout(async () => {
+                        setTurnTimer(room, role, null);
+                        const activeSession = await ensureSpeakerSession(room, role);
+                        activeSession?.endAudioTurn();
+                    }, 1800);
+                    setTurnTimer(room, role, timer);
+                }
+
+                if (forwarded || !speechClient) {
+                    return;
+                }
+            }
+
+            const stream = ensureSttStream(room, role);
+            if (!stream) {
                 socket.emit('room-debug', {
-                    type: 'gemini-audio-received',
+                    type: 'gemini-status',
+                    status: 'Transcription unavailable',
                     createdAt: new Date().toISOString(),
                 });
+                return;
+            }
+
+            try {
+                stream.write(Buffer.from(payload.pcmData, 'base64'));
+            } catch (error) {
+                console.error('[ConversationRoom] Failed to send audio to STT', error);
             }
         });
 
@@ -714,25 +1003,81 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 return;
             }
 
-            const session = await ensureSpeakerSession(room, role);
-            session?.endAudioTurn();
-            await analyzeBufferedAudio(room, role);
+            const turnTimer = getTurnTimer(room, role);
+            if (turnTimer) {
+                clearTimeout(turnTimer);
+                setTurnTimer(room, role, null);
+            }
+
+            if (useGeminiTranscription || !speechClient) {
+                const session = await ensureSpeakerSession(room, role);
+                if (session || !speechClient) {
+                    session?.endAudioTurn();
+                    return;
+                }
+            }
+
+            const stream = getSttStream(room, role);
+            if (stream) {
+                stream.end();
+                setSttStream(room, role, null);
+            }
+
+            if (getTranscriptBuffer(room, role).length > 0) {
+                scheduleAnalysis(room, role);
+            }
+        });
+
+        socket.on('client-live-transcript', ({ transcript }: ClientTranscriptPayload = {}) => {
+            const roomId = roomBySocket.get(socket.id);
+            if (!roomId || !transcript) {
+                return;
+            }
+
+            const room = rooms.get(roomId);
+            if (!room) {
+                return;
+            }
+
+            const role = getRole(room, socket.id);
+            if (!role) {
+                return;
+            }
+
+            handleTranscript(room, role, transcript, false);
+        });
+
+        socket.on('client-final-transcript', ({ transcript }: ClientTranscriptPayload = {}) => {
+            const roomId = roomBySocket.get(socket.id);
+            if (!roomId || !transcript) {
+                return;
+            }
+
+            const room = rooms.get(roomId);
+            if (!room) {
+                return;
+            }
+
+            const role = getRole(room, socket.id);
+            if (!role) {
+                return;
+            }
+
+            handleTranscript(room, role, transcript, true);
         });
 
         socket.on('leave-room', () => {
-            removeFromQueue(socket.id);
             const roomId = roomBySocket.get(socket.id);
             if (!roomId) {
-                socket.emit('room-ended', { message: 'You left the queue' });
+                socket.emit('room-ended', { message: 'You left the call' });
                 return;
             }
 
             closeRoom(roomId, socket.id);
-            socket.emit('room-ended', { message: 'You left the room' });
+            socket.emit('room-ended', { message: 'You left the call' });
         });
 
         socket.on('disconnect', () => {
-            removeFromQueue(socket.id);
             const roomId = roomBySocket.get(socket.id);
             if (roomId) {
                 closeRoom(roomId, socket.id);
