@@ -606,7 +606,7 @@ const Rooms = () => {
                     <div className="mt-6 grid gap-4 md:grid-cols-2">
                         <div className="rounded-[26px] border border-slate-200/80 bg-white/92 p-5 shadow-sm">
                             <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Live Subtitles</p>
-                            <div className="mt-4 min-h-[140px] max-h-[280px] overflow-y-auto rounded-2xl bg-slate-50 px-4 py-4 text-left text-sm leading-7 text-slate-900">
+                            <div role="log" aria-live="polite" className="mt-4 min-h-[140px] max-h-[280px] overflow-y-auto rounded-2xl bg-slate-50 px-4 py-4 text-left text-sm leading-7 text-slate-900">
                                 {subtitles.length > 0 ? (
                                     subtitles.map((entry) => {
                                         const isSelf = entry.speakerRole === userRole;

@@ -65,7 +65,7 @@ type RoomState = {
 };
 
 type LiveSession = {
-    sendRealtimeInput: (input: Record<string, unknown>) => void;
+    sendRealtimeInput: (input: { audio: { data: string; mimeType: string } } | { audioStreamEnd: true }) => void;
     close: () => void;
 };
 
@@ -944,6 +944,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                     if (existingTimer) {
                         clearTimeout(existingTimer);
                     }
+                    // 2.5s matches the frontend SILENCE_MS (2s) plus network latency buffer
                     const timer = setTimeout(async () => {
                         setTurnTimer(room, role, null);
                         const activeSession = await ensureSpeakerSession(room, role);
