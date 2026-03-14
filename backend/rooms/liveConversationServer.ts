@@ -3,6 +3,8 @@ import type { Server as HttpServer } from 'http';
 import { SpeechClient } from '@google-cloud/speech';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { Server as SocketIOServer, Socket } from 'socket.io';
+import { runAnalysisPipeline } from '../agents/analysisPipeline.ts';
+import { checkGrammar } from '../agents/grammarAgent.ts';
 import { processSpeech } from '../agents/speechProcessor.ts';
 
 type SpeakerRole = 'userA' | 'userB';
@@ -88,25 +90,7 @@ Rules:
 - interruptTip should be immediate and imperative, for example "Pronounce: working."
 - If speech is already clear, leave correction, pronunciationTip, and interruptTip empty.`;
 
-const ANALYSIS_PROMPT = `Analyze the transcript and return ONLY valid JSON with this exact shape:
-{
-  "transcript": "clean sentence transcript",
-  "correction": "grammar fix or cleaned sentence",
-  "pronunciationTip": "short pronunciation coaching",
-  "interruptTip": "very short immediate correction"
-}
-
-Rules:
-- No markdown.
-- No extra keys.
-- Keep responses concise.
-- correction should be a direct sentence to repeat.
-- pronunciationTip must be short and direct.
-- interruptTip must be very short and imperative.
-- If the sentence is already clear, keep coaching fields empty.`;
-
 const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-2.5-flash-native-audio-latest';
-const ANALYSIS_MODEL = process.env.GEMINI_ANALYSIS_MODEL || 'gemini-2.5-flash';
 const STT_LANGUAGE = process.env.STT_LANGUAGE || 'en-US';
 
 class SpeakerSession {
@@ -629,7 +613,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
     };
 
     const analyzeTranscriptText = async (room: RoomState, role: SpeakerRole, transcript: string) => {
-        if (!ai || !transcript) {
+        if (!transcript) {
             return;
         }
 
@@ -650,33 +634,27 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 createdAt: new Date().toISOString(),
             });
 
-            const response = await ai.models.generateContent({
-                model: ANALYSIS_MODEL,
-                contents: [
-                    {
-                        role: 'user',
-                        parts: [
-                            { text: ANALYSIS_PROMPT },
-                            { text: `Transcript:\n${transcript}` },
-                        ],
-                    },
-                ],
-                config: {
-                    responseMimeType: 'application/json',
-                    temperature: 0.2,
-                },
-            });
+            const [analysis, grammar] = await Promise.all([
+                runAnalysisPipeline(transcript, transcript),
+                checkGrammar(transcript),
+            ]);
 
-            const text = response.text || '{}';
-            const start = text.indexOf('{');
-            const end = text.lastIndexOf('}');
-            const parsed = JSON.parse(start !== -1 && end !== -1 ? text.slice(start, end + 1) : text) as Partial<AIFeedback>;
-            const feedback = normalizeFeedback(parsed);
+            const firstProblemWord = analysis.speakCorrectWords?.[0] || analysis.incorrectWords?.[0] || analysis.unclearWords?.[0] || '';
+            const correction = typeof grammar.correction === 'string'
+                && grammar.correction.trim().length > 0
+                && !grammar.correction.toLowerCase().includes('error occurred while checking grammar')
+                && !grammar.correction.toLowerCase().includes('cannot check grammar')
+                    ? grammar.correction.trim()
+                    : transcript;
 
-            emitFeedback(room, role, {
-                ...feedback,
-                transcript: feedback.transcript || transcript,
-            });
+            const feedback: AIFeedback = {
+                transcript,
+                correction,
+                pronunciationTip: analysis.tips?.[0] || analysis.suggestions?.[0] || '',
+                interruptTip: firstProblemWord ? `Pronounce: ${firstProblemWord}.` : '',
+            };
+
+            emitFeedback(room, role, feedback);
 
             socket.emit('room-debug', {
                 type: 'gemini-status',

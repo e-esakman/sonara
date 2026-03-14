@@ -9,6 +9,7 @@ import progressRoute from './routes/progress.ts';
 import grammarRoute from './routes/grammar.ts';
 import { setupLiveProxy } from './liveProxy.ts';
 import { setupConversationRoomServer } from './rooms/liveConversationServer.ts';
+import { setupRoomVoiceWs } from './roomVoiceWs.ts';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -49,6 +50,7 @@ const server = http.createServer(app);
 // Gemini Live WebSocket proxy — API key stays server-side
 setupLiveProxy(server);
 setupConversationRoomServer(server, Array.from(allowedOrigins));
+setupRoomVoiceWs(server);
 
 server.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EADDRINUSE') {
