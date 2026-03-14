@@ -72,7 +72,7 @@ export function createConversationRoomSocket(): Socket {
     return io(BACKEND_URL, {
         withCredentials: true,
         reconnection: true,
-        transports: ['polling', 'websocket'],
+        transports: ['polling'],
     });
 }
 

@@ -65,7 +65,7 @@ type RoomState = {
 };
 
 type LiveSession = {
-    sendRealtimeInput: (input: { audio: { data: string; mimeType: string } } | { audioStreamEnd: true }) => void;
+    sendRealtimeInput: (input: { audio: { data: string; mimeType: string } }) => void;
     close: () => void;
 };
 
@@ -135,7 +135,7 @@ class SpeakerSession {
                     onerror: () => this.onStatus('Coach unavailable'),
                     onclose: () => {
                         this.session = null;
-                        this.onStatus('Coach reconnecting...');
+                        this.onStatus('Coach standing by');
                     },
                 },
                 config: {
@@ -148,10 +148,6 @@ class SpeakerSession {
             console.error('[ConversationRoom] Failed to connect Gemini session', error);
             this.onStatus('Coach unavailable');
         }
-    }
-
-    get isConnected() {
-        return this.session !== null;
     }
 
     sendAudio(audio: string, mimeType: string) {
@@ -179,7 +175,7 @@ class SpeakerSession {
         }
 
         try {
-            this.session.sendRealtimeInput({ audioStreamEnd: true });
+            this.session.sendRealtimeInput({ audioStreamEnd: true } as unknown as { audio: { data: string; mimeType: string } });
         } catch (error) {
             console.error('[ConversationRoom] Failed to end Gemini audio stream', error);
         }
@@ -609,8 +605,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
     const ensureSpeakerSession = async (room: RoomState, role: SpeakerRole) => {
         const key = role === 'userA' ? 'geminiSessionA' : 'geminiSessionB';
         let session = room[key];
-        if (!session || !session.isConnected) {
-            session?.close();
+        if (!session) {
             session = await createSpeakerSession(room, role);
             room[key] = session;
         }
@@ -939,17 +934,12 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                     });
                 }
 
-                if (forwarded) {
-                    const existingTimer = getTurnTimer(room, role);
-                    if (existingTimer) {
-                        clearTimeout(existingTimer);
-                    }
-                    // 2.5s matches the frontend SILENCE_MS (2s) plus network latency buffer
+                if (forwarded && !getTurnTimer(room, role)) {
                     const timer = setTimeout(async () => {
                         setTurnTimer(room, role, null);
                         const activeSession = await ensureSpeakerSession(room, role);
                         activeSession?.endAudioTurn();
-                    }, 2500);
+                    }, 1800);
                     setTurnTimer(room, role, timer);
                 }
 
