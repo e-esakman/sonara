@@ -11,7 +11,7 @@ import { setupLiveProxy } from './liveProxy.ts';
 import { setupConversationRoomServer } from './rooms/liveConversationServer.ts';
 
 const app = express();
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8080;
 
 const allowedOrigins = new Set(
     (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173')
@@ -20,15 +20,8 @@ const allowedOrigins = new Set(
         .filter(Boolean)
 );
 app.use(cors({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (e.g. server-to-server, curl) or matching origins
-        if (!origin || allowedOrigins.has(origin)) {
-            callback(null, origin || true);
-        } else {
-            callback(new Error(`CORS: origin '${origin}' is not allowed`));
-        }
-    },
-    credentials: true,
+    origin: true,
+    credentials: true
 }));
 app.use(express.json());
 
@@ -50,5 +43,5 @@ setupLiveProxy(server);
 setupConversationRoomServer(server, Array.from(allowedOrigins));
 
 server.listen(port, () => {
-    console.log(`Sonara backend listening at http://localhost:${port}`);
+    console.log(`Sonara backend running on port ${port}`);
 });
