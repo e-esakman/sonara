@@ -164,6 +164,92 @@ This document catalogues current technical limitations, known bugs, and edge cas
 
 ---
 
+## 8. Minor Edge Cases That Silently Break Voice or Transcription
+
+These are smaller, targeted bugs found directly in the source code. Each one can cause audio to stop flowing or transcription to silently fail without any visible error.
+
+---
+
+### 8.1 Wrong fallback model name — `gemini-3-flash-preview` does not exist
+**File:** `backend/rooms/liveConversationServer.ts` — `analyzeBufferedAudio()`  
+**Issue:** The post-turn fallback calls `ai.models.generateContent({ model: 'gemini-3-flash-preview', ... })`. This model identifier does not exist in the Gemini API (the correct name is `gemini-2.0-flash-001` or `gemini-1.5-flash`).  
+**Impact:** Every post-turn fallback analysis silently throws a `404 / NOT_FOUND` error, which is caught and logged. The user sees "Gemini analysis failed" in the debug panel and receives no fallback transcript. This is a guaranteed failure on every call.  
+**Fix:** Change to a valid model name and move it to an environment variable, matching the approach recommended for the Live model in item 4.4.
+
+---
+
+### 8.2 `ensureSpeakerSession` race condition creates duplicate Gemini sessions
+**File:** `backend/rooms/liveConversationServer.ts` — `ensureSpeakerSession()` and the `audio-stream` handler  
+**Issue:** `audio-stream` events fire every ~256 ms. Each handler `await`s `ensureSpeakerSession`. Because `async` handlers are not serialized, multiple calls can enter the function concurrently while `room[key]` is still `null`. Each concurrent call starts a new `SpeakerSession.connect()`, and all but the last overwrite `room[key]`, leaving orphaned Gemini Live sessions open indefinitely.  
+**Impact:** Duplicate Gemini connections consume API quota. The sessions that lose the race are never closed, and their callbacks fire into a stale closure, occasionally emitting phantom feedback events to the wrong socket.  
+**Fix:** Set `room[key]` to a sentinel (e.g., a pending `Promise`) before the first `await`, so subsequent calls return the in-flight promise rather than starting a new session.
+
+---
+
+### 8.3 Socket.IO reconnection silently destroys room membership
+**File:** `src/services/liveConversationRoom.ts`, `backend/rooms/liveConversationServer.ts`  
+**Issue:** Socket.IO is created with `reconnection: true`. If the connection drops and reconnects, the socket gets a new `socket.id`. The backend's `roomBySocket` map still has the old socket ID; the new ID is unknown. All subsequent `audio-stream` events are silently discarded (`roomBySocket.get(socket.id)` returns `undefined`). The frontend still shows the room as connected.  
+**Impact:** After any reconnect, the user's audio is silently dropped, no transcription occurs, and no error is shown.  
+**Fix:** Either disable reconnection (`reconnection: false`) and show a clear "Connection lost, please rejoin" message, or implement a `rejoin-room` socket event that the client emits on `reconnect` with the stored `roomId` so the backend can remap the socket ID.
+
+---
+
+### 8.4 `AudioContext` enters suspended state after browser tab blur
+**File:** `src/pages/Rooms.tsx` — `startSpeaking()`  
+**Issue:** Chromium-based browsers automatically suspend `AudioContext` when the page loses focus (e.g., user alt-tabs). The `ScriptProcessorNode`'s `onaudioprocess` callback stops firing. The code never calls `micContextRef.current.resume()` after the context is suspended.  
+**Impact:** If the user switches away and back, audio processing stops silently. The waveform freezes, no PCM is sent, and the Gemini Live session eventually times out waiting for input.  
+**Fix:** Listen to `document.addEventListener('visibilitychange', ...)` and call `micContextRef.current?.resume()` when `document.visibilityState === 'visible'` and the mic is active.
+
+---
+
+### 8.5 Partner audio relay fails silently on iOS Safari
+**File:** `src/pages/Rooms.tsx` — `relayMimeType` detection  
+**Issue:** The `relayMimeType` is chosen by checking `MediaRecorder.isTypeSupported('audio/webm;codecs=opus')`, falling back to `'audio/webm'`. Neither format is supported by `MediaRecorder` on iOS Safari (which only supports `audio/mp4`). When `MediaRecorder` is constructed with an unsupported `mimeType`, it throws a `NotSupportedError`.  
+**Impact:** The `relayRecorder` creation inside `startSpeaking()` throws, which is not caught. The whole `startSpeaking()` call rejects, the mic never starts, and the user sees "Unable to access your microphone right now."  
+**Fix:** Add `audio/mp4` to the type detection chain; wrap `new MediaRecorder(stream, { mimeType })` in a `try/catch` and fall back to `new MediaRecorder(stream)` with no explicit mimeType.
+
+---
+
+### 8.6 Duplicate feedback emission for the same speech turn
+**File:** `backend/rooms/liveConversationServer.ts` — `SpeakerSession.handleMessage()`  
+**Issue:** The message handler emits a feedback event for `inputTranscription.text` (the raw transcript) **and** separately parses `modelTurn.parts[].text` for a JSON feedback object. When Gemini returns both in the same message, `onFeedback()` is called twice for the same turn — first with only the transcript, then again with the full parsed JSON.  
+**Impact:** The frontend receives two `ai-feedback` events per turn. The first (transcript-only) appears in the feedback panel immediately, then a second entry arrives with the pronunciation tip and correction. Users see the same turn listed twice.  
+**Fix:** Prefer the full JSON feedback when it parses successfully; emit the raw `inputTranscription.text` only as a fallback when JSON parsing fails.
+
+---
+
+### 8.7 Microphone OS indicator stays active after leaving a room
+**File:** `src/pages/Rooms.tsx` — `leaveRoom()`  
+**Issue:** `leaveRoom()` calls `stopSpeaking()`, which disconnects the Web Audio graph nodes but does **not** call `mediaStreamRef.current?.getTracks().forEach(t => t.stop())`. The underlying `MediaStream` track stays live.  
+**Impact:** The browser's microphone-in-use indicator (the red dot in the tab) stays active after leaving the room. On mobile, the microphone hardware may not release until the component unmounts. The OS mic lock can prevent other apps from accessing the microphone.  
+**Fix:** In `stopSpeaking()` (or immediately after in `leaveRoom()`), call `mediaStreamRef.current?.getTracks().forEach(t => t.stop())` and set `mediaStreamRef.current = null` so the next `ensureMicrophone()` call requests a fresh stream.
+
+---
+
+### 8.8 `partnerAudioQueueRef` not cleared when the room ends
+**File:** `src/pages/Rooms.tsx` — `room-ended` socket handler  
+**Issue:** The `room-ended` event handler calls `stopSpeaking()` but does not reset `partnerAudioQueueRef.current`. If audio chunks arrived just before the room ended, they sit in the queue and are played after the user is back in the lobby.  
+**Impact:** The user hears the partner's voice unexpectedly after the room has ended, potentially over a new room's audio.  
+**Fix:** Add `partnerAudioQueueRef.current = [];` inside the `room-ended` handler (alongside the existing `stopSpeaking()` call).
+
+---
+
+### 8.9 `webkitAudioContext` ignores the `sampleRate` constructor option
+**File:** `src/pages/Rooms.tsx` — `startSpeaking()`  
+**Issue:** On older Safari, `webkitAudioContext` does not honor the `sampleRate` option passed to its constructor. The context is created at the system's default rate (typically 44 100 Hz or 48 000 Hz). The PCM data sent to Gemini is then labelled `audio/pcm;rate=16000` but actually contains audio at a higher rate.  
+**Impact:** Gemini receives audio that is pitched down and approximately 2.75× slower than expected. Transcription fails or returns garbled text.  
+**Fix:** After creating the context, check `micContext.sampleRate` and, if it differs from 16 000 Hz, insert an `OfflineAudioContext` resample step, or explicitly inform the user that their browser does not support the required audio format.
+
+---
+
+### 8.10 `VITE_BACKEND_URL` fallback constructs wrong URL in production
+**File:** `src/services/liveConversationRoom.ts`  
+**Issue:** When `VITE_BACKEND_URL` is not set, the service falls back to `` `${window.location.protocol}//${window.location.hostname}:3000` ``. On Vercel, `window.location.hostname` is the Vercel domain (e.g., `sonara.vercel.app`). The constructed URL becomes `https://sonara.vercel.app:3000`, which does not exist.  
+**Impact:** All Socket.IO connection attempts fail in production if `VITE_BACKEND_URL` is not explicitly configured on Vercel. The error shows as "Room server offline" with no hint that the environment variable is missing.  
+**Fix:** Remove the dynamic fallback and document that `VITE_BACKEND_URL` is **required** in production deployments; throw an explicit error or display a configuration warning when the variable is absent.
+
+---
+
 ## Priority Matrix
 
 | ID | Area | Severity | Effort | Recommended Action |
@@ -171,10 +257,20 @@ This document catalogues current technical limitations, known bugs, and edge cas
 | 2.3 | Multi-instance room state | 🔴 Critical | Medium | Redis adapter |
 | 5.1 | CORS over-permissive | 🔴 Critical | Low | Fix `cors()` call |
 | 5.2 | Unauthenticated rooms | 🔴 Critical | Medium | JWT on handshake |
+| 8.1 | Wrong fallback model name | 🔴 Critical | Low | Fix model name / env var |
+| 8.3 | Reconnect destroys room membership | 🔴 Critical | Low | `rejoin-room` event or disable reconnect |
 | 2.1 | Polling-only transport | 🟠 High | Low | Enable WS transport |
 | 3.3 | Orphaned invite rooms | 🟠 High | Low | TTL + cleanup |
-| 4.4 | Preview model hardcoded | 🟠 High | Low | Env var for model name |
+| 4.4 | Preview Live model hardcoded | 🟠 High | Low | Env var for model name |
+| 8.2 | `ensureSpeakerSession` race | 🟠 High | Low | Promise sentinel guard |
+| 8.5 | iOS Safari MediaRecorder failure | 🟠 High | Low | `audio/mp4` fallback |
+| 8.10 | `VITE_BACKEND_URL` wrong fallback | 🟠 High | Low | Require env var, add warning |
 | 1.1 | `ScriptProcessorNode` deprecated | 🟡 Medium | High | AudioWorklet migration |
 | 4.2 | Redundant fallback transcription | 🟡 Medium | Low | Gate on Live transcript |
 | 6.3 | No error boundary | 🟡 Medium | Low | Add `ErrorBoundary` |
 | 7.1 | Cloud Run concurrency | 🟡 Medium | Low | Tune `--concurrency` |
+| 8.4 | AudioContext suspended on blur | 🟡 Medium | Low | `visibilitychange` resume |
+| 8.6 | Duplicate feedback per turn | 🟡 Medium | Low | Prefer JSON over raw transcript |
+| 8.7 | Mic track not released on leave | 🟡 Medium | Low | `getTracks().stop()` in `leaveRoom` |
+| 8.8 | Partner audio queue not cleared | 🟡 Medium | Low | Clear queue in `room-ended` handler |
+| 8.9 | `webkitAudioContext` ignores sampleRate | 🟡 Medium | Medium | Post-construct rate check + resample |
