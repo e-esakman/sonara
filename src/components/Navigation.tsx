@@ -15,7 +15,6 @@ const Navigation = () => {
         { to: '/rooms', label: 'Rooms' },
         { to: '/grammar', label: 'Grammar' },
         { to: '/library', label: 'Library' },
-        { to: '/architecture', label: 'Architecture' },
     ];
 
     const userLinks = [

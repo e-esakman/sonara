@@ -13,7 +13,6 @@ import Login from './pages/Login';
 import Grammar from './pages/Grammar';
 import Rooms from './pages/Rooms';
 import RoomsErrorBoundary from './components/RoomsErrorBoundary';
-import Architecture from './pages/Architecture';
 
 function App() {
   return (
@@ -32,7 +31,6 @@ function App() {
             <Route path="progress" element={<ProtectedRoute><ProgressDashboard /></ProtectedRoute>} />
             <Route path="analytics" element={<ProtectedRoute><ProgressDashboard /></ProtectedRoute>} />
             <Route path="sessions" element={<ProtectedRoute><Sessions /></ProtectedRoute>} />
-            <Route path="architecture" element={<Architecture />} />
           </Route>
         </Routes>
       </BrowserRouter>
