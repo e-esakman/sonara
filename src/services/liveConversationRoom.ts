@@ -37,8 +37,8 @@ export type AITip = {
 
 const browserBackendUrl =
     typeof window !== 'undefined'
-        ? `${window.location.protocol}//${window.location.hostname}:3000`
-        : 'http://localhost:3000';
+        ? `${window.location.protocol}//${window.location.hostname}:8080`
+        : 'http://localhost:8080';
 
 const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || browserBackendUrl;
 
