@@ -245,7 +245,7 @@ const Grammar = () => {
         setAnalyzedText(inputText.trim());
 
         try {
-            const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+            const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8080';
             const res = await fetch(`${baseUrl}/grammar`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },

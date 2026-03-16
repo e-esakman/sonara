@@ -6,7 +6,7 @@ type GeminiServerContent = {
 };
 type GeminiServerMessage = { serverContent?: GeminiServerContent };
 
-const BACKEND_WS_URL = import.meta.env.VITE_BACKEND_WS_URL || 'ws://localhost:3000/live-ws';
+const BACKEND_WS_URL = import.meta.env.VITE_BACKEND_WS_URL || 'ws://localhost:8080/live-ws';
 
 class GeminiLiveService {
     private ws: WebSocket | null = null;

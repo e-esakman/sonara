@@ -88,7 +88,7 @@ const Rooms = () => {
             setCallState('idle');
             setCallStatus('Room server offline');
             setCoachStatus('AI coach unavailable');
-            setErrorMessage('Unable to reach the room server on port 3000. Start the backend and try again.');
+            setErrorMessage('Unable to reach the room server on port 8080. Start the backend and try again.');
         });
 
         socket.on('disconnect', () => {
