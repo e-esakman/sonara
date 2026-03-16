@@ -1,4 +1,4 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+import { getRequiredBackendUrl } from './backendConfig';
 
 export interface AnalysisResult {
     accuracyScore: number;
@@ -11,7 +11,8 @@ export interface AnalysisResult {
 
 export const analyzePronunciation = async (text: string, transcript: string): Promise<AnalysisResult> => {
     try {
-        const response = await fetch(`${BACKEND_URL}/analyze`, {
+        const backendUrl = getRequiredBackendUrl();
+        const response = await fetch(`${backendUrl}/analyze`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

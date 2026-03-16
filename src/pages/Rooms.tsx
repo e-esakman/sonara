@@ -3,6 +3,7 @@ import { Icon } from '@iconify/react';
 import type { Socket } from 'socket.io-client';
 import { useStore } from '../store/useStore';
 import RoomWaveform from '../components/RoomWaveform';
+import { speakText, stopSpeaking as stopTts } from '../utils/tts';
 import {
     base64ToBlob,
     blobToBase64,
@@ -11,36 +12,48 @@ import {
     type AIFeedback,
     type AITip,
     type InviteRoomCreatedPayload,
+    type PronunciationFeedbackRow,
     type RoomReadyPayload,
     type TranscriptEntry,
     pcmFloat32ToBase64,
 } from '../services/liveConversationRoom';
+import { getBackendUrlConfigError } from '../services/backendConfig';
 
-type CallState = 'idle' | 'queueing' | 'waiting-link' | 'connected' | 'ended';
+type CallState = 'idle' | 'waiting-link' | 'connected' | 'ended';
 
-const relayMimeType = (() => {
-    if (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
-        return 'audio/webm;codecs=opus';
+const MAX_TRANSCRIPT_ENTRIES = 100;
+const TRANSCRIPT_BATCH_MS = 120;
+const FEEDBACK_VOICE_INTERVAL_MS = 5000;
+const WAVEFORM_UPDATE_MS = 120;
+
+function getRelayMimeType() {
+    if (typeof MediaRecorder === 'undefined') {
+        return '';
     }
-    return 'audio/webm';
-})();
+
+    const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+    return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? '';
+}
 
 const Rooms = () => {
-    const { user } = useStore();
+    const { user, accentStyle } = useStore();
     const [callState, setCallState] = useState<CallState>('idle');
-    const [callStatus, setCallStatus] = useState('Ready to join a room');
+    const [callStatus, setCallStatus] = useState('Ready to create a room');
     const [coachStatus, setCoachStatus] = useState('AI coach standing by');
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [isSocketConnected, setIsSocketConnected] = useState(false);
     const [roomId, setRoomId] = useState<string | null>(null);
     const [userRole, setUserRole] = useState<'userA' | 'userB'>('userA');
     const [selfLabel, setSelfLabel] = useState(user?.name || 'You');
-    const [partnerLabel, setPartnerLabel] = useState('Waiting for match');
+    const [partnerLabel, setPartnerLabel] = useState('Waiting for your friend');
     const [inviteUrl, setInviteUrl] = useState('');
     const [isMuted, setIsMuted] = useState(false);
     const [isMicActive, setIsMicActive] = useState(false);
     const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
     const [feedbackItems, setFeedbackItems] = useState<AIFeedback[]>([]);
+    const [coachQuestion, setCoachQuestion] = useState('');
+    const [coachMessages, setCoachMessages] = useState<Array<{ id: string; role: 'user' | 'ai'; text: string; createdAt: string }>>([]);
+    const [isAskingCoach, setIsAskingCoach] = useState(false);
     const [liveTip, setLiveTip] = useState<AITip | null>(null);
     const [waveformSamples, setWaveformSamples] = useState<number[]>([]);
     const [lastAudioSentAt, setLastAudioSentAt] = useState<string | null>(null);
@@ -55,27 +68,133 @@ const Rooms = () => {
     const pcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
     const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
     const isMutedRef = useRef(false);
+    const isMicActiveRef = useRef(false);
     const isRoomActiveRef = useRef(false);
     const inviteJoinAttemptedRef = useRef(false);
     const liveTipTimeoutRef = useRef<number | null>(null);
     const partnerAudioQueueRef = useRef<Array<{ audio: string; mimeType: string }>>([]);
     const isPlayingPartnerAudioRef = useRef(false);
+    const transcriptPanelRef = useRef<HTMLDivElement | null>(null);
+    const pendingTranscriptEntriesRef = useRef<TranscriptEntry[]>([]);
+    const transcriptBatchTimeoutRef = useRef<number | null>(null);
+    const pendingWaveformFrameRef = useRef<number | null>(null);
+    const lastWaveformUpdateRef = useRef(0);
+    const pendingVoiceFeedbackRef = useRef<AIFeedback | null>(null);
+    const lastVoiceFeedbackAtRef = useRef<number>(0);
+    const voiceFeedbackIntervalRef = useRef<number | null>(null);
+    const roomSessionRef = useRef<{ roomId: string | null; role: 'userA' | 'userB'; name: string }>({
+        roomId: null,
+        role: 'userA',
+        name: user?.name || 'Guest',
+    });
 
     useEffect(() => {
         isMutedRef.current = isMuted;
     }, [isMuted]);
 
     useEffect(() => {
-        const socket = createConversationRoomSocket();
+        isMicActiveRef.current = isMicActive;
+    }, [isMicActive]);
+
+    useEffect(() => {
+        roomSessionRef.current = {
+            roomId,
+            role: userRole,
+            name: user?.name || selfLabel || 'Guest',
+        };
+    }, [roomId, selfLabel, user?.name, userRole]);
+
+    const resetPartnerAudioQueue = () => {
+        partnerAudioQueueRef.current = [];
+        isPlayingPartnerAudioRef.current = false;
+    };
+
+    const flushTranscriptBatch = () => {
+        if (transcriptBatchTimeoutRef.current) {
+            window.clearTimeout(transcriptBatchTimeoutRef.current);
+            transcriptBatchTimeoutRef.current = null;
+        }
+
+        if (pendingTranscriptEntriesRef.current.length === 0) {
+            return;
+        }
+
+        const pendingEntries = pendingTranscriptEntriesRef.current;
+        pendingTranscriptEntriesRef.current = [];
+
+        setTranscripts((current) => [...current, ...pendingEntries].slice(-MAX_TRANSCRIPT_ENTRIES));
+    };
+
+    const queueTranscriptEntry = (entry: TranscriptEntry) => {
+        pendingTranscriptEntriesRef.current.push(entry);
+        if (transcriptBatchTimeoutRef.current) {
+            return;
+        }
+
+        transcriptBatchTimeoutRef.current = window.setTimeout(() => {
+            flushTranscriptBatch();
+        }, TRANSCRIPT_BATCH_MS);
+    };
+
+    const pushWaveformSample = (sample: number) => {
+        const now = performance.now();
+        if (now - lastWaveformUpdateRef.current < WAVEFORM_UPDATE_MS) {
+            return;
+        }
+        lastWaveformUpdateRef.current = now;
+
+        if (pendingWaveformFrameRef.current) {
+            window.cancelAnimationFrame(pendingWaveformFrameRef.current);
+        }
+
+        pendingWaveformFrameRef.current = window.requestAnimationFrame(() => {
+            setWaveformSamples((current) => [...current.slice(-27), sample]);
+            pendingWaveformFrameRef.current = null;
+        });
+    };
+
+    const releaseMicrophone = async () => {
+        mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+
+        if (micContextRef.current) {
+            try {
+                await micContextRef.current.close();
+            } catch {
+                // intentionally ignored
+            }
+            micContextRef.current = null;
+        }
+    };
+
+    useEffect(() => {
+        let socket: Socket;
+        try {
+            socket = createConversationRoomSocket();
+        } catch (error) {
+            const message = error instanceof Error ? error.message : getBackendUrlConfigError();
+            setErrorMessage(message);
+            setCallStatus('Configuration error');
+            setCoachStatus('AI coach unavailable');
+            setIsSocketConnected(false);
+            return;
+        }
+
         socketRef.current = socket;
 
         socket.on('connect', () => {
             setIsSocketConnected(true);
             setErrorMessage(null);
-            setCallStatus('Ready to join a room');
+            const savedSession = roomSessionRef.current;
+            if (savedSession.roomId) {
+                setCallStatus('Rejoining room...');
+                socket.emit('rejoin-room', savedSession);
+                return;
+            }
 
+            setCallStatus('Ready to create a room');
             const roomParam = new URLSearchParams(window.location.search).get('room');
-            if (roomParam && !inviteJoinAttemptedRef.current) {
+            if (roomParam && !inviteJoinAttemptedRef.current && !savedSession.roomId) {
                 inviteJoinAttemptedRef.current = true;
                 setCallState('waiting-link');
                 setCallStatus('Joining shared room...');
@@ -83,25 +202,17 @@ const Rooms = () => {
             }
         });
 
-        socket.on('connect_error', () => {
+        socket.on('connect_error', (err: Error) => {
             setIsSocketConnected(false);
             setCallState('idle');
-            setCallStatus('Room server offline');
+            setCallStatus(`Room server offline: ${err.message}`);
             setCoachStatus('AI coach unavailable');
-            setErrorMessage('Unable to reach the room server on port 8080. Start the backend and try again.');
+            setErrorMessage(`Socket connection failed: ${err.message}. Start the backend and try again.`);
         });
 
         socket.on('disconnect', () => {
             setIsSocketConnected(false);
-            setCallState('idle');
-            setCallStatus('Disconnected from room server');
-        });
-
-        socket.on('queue-status', ({ status }: { status: string }) => {
-            setCallState('queueing');
-            setCallStatus(status);
-            setPartnerLabel('Waiting for match');
-            setErrorMessage(null);
+            setCallStatus(isRoomActiveRef.current ? 'Connection lost. Reconnecting...' : 'Disconnected from room server');
         });
 
         socket.on('invite-room-created', (payload: InviteRoomCreatedPayload) => {
@@ -140,12 +251,28 @@ const Rooms = () => {
             setCallStatus('Room unavailable');
         });
 
-        socket.on('transcript-entry', (entry: TranscriptEntry) => {
-            setTranscripts((current) => [entry, ...current].slice(0, 24));
-        });
+        socket.on('transcript-entry', queueTranscriptEntry);
 
         socket.on('ai-feedback', (feedback: AIFeedback) => {
             setFeedbackItems((current) => [feedback, ...current].slice(0, 12));
+            pendingVoiceFeedbackRef.current = feedback;
+        });
+
+        socket.on('coach-answer', ({ question, answer, createdAt }: { question: string; answer: string; createdAt: string }) => {
+            setCoachMessages((current) => {
+                const next: Array<{ id: string; role: 'user' | 'ai'; text: string; createdAt: string }> = [];
+                if (answer) {
+                    next.push({ id: `${createdAt}-a`, role: 'ai', text: answer, createdAt });
+                }
+                if (question) {
+                    next.push({ id: `${createdAt}-q`, role: 'user', text: question, createdAt });
+                }
+                return [...next, ...current].slice(0, 6);
+            });
+            if (answer) {
+                speakText({ text: answer, accentStyle, rate: 0.95 });
+            }
+            setIsAskingCoach(false);
         });
 
         socket.on('room-debug', (payload: {
@@ -186,20 +313,97 @@ const Rooms = () => {
             setCallStatus(message);
             setRoomId(null);
             setInviteUrl('');
-            setPartnerLabel('Waiting for match');
+            setPartnerLabel('Waiting for your friend');
             isRoomActiveRef.current = false;
-            stopSpeaking();
+            resetPartnerAudioQueue();
+            stopTts();
+            void stopSpeaking(false);
+            void releaseMicrophone();
         });
 
         return () => {
             if (liveTipTimeoutRef.current) {
                 window.clearTimeout(liveTipTimeoutRef.current);
             }
-            stopSpeaking();
-            mediaStreamRef.current?.getTracks().forEach((track) => track.stop());
+            flushTranscriptBatch();
+            resetPartnerAudioQueue();
+            stopTts();
+            void stopSpeaking(false);
+            void releaseMicrophone();
             socket.disconnect();
         };
     }, [user?.name]);
+
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (!document.hidden && micContextRef.current?.state === 'suspended') {
+                void micContextRef.current.resume().catch(() => undefined);
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, []);
+
+    useEffect(() => {
+        const panel = transcriptPanelRef.current;
+        if (!panel) {
+            return;
+        }
+
+        panel.scrollTo({
+            top: panel.scrollHeight,
+            behavior: 'smooth',
+        });
+    }, [transcripts]);
+
+    useEffect(() => {
+        if (callState !== 'connected') {
+            if (voiceFeedbackIntervalRef.current) {
+                window.clearInterval(voiceFeedbackIntervalRef.current);
+                voiceFeedbackIntervalRef.current = null;
+            }
+            return;
+        }
+
+        if (voiceFeedbackIntervalRef.current) {
+            return;
+        }
+
+        voiceFeedbackIntervalRef.current = window.setInterval(() => {
+            if (!isRoomActiveRef.current || !isMicActiveRef.current) {
+                return;
+            }
+
+            const pending = pendingVoiceFeedbackRef.current;
+            if (!pending) {
+                return;
+            }
+
+            const now = Date.now();
+            if (now - lastVoiceFeedbackAtRef.current < FEEDBACK_VOICE_INTERVAL_MS) {
+                return;
+            }
+
+            const text = (pending.pronunciationTip || pending.correction || pending.rows?.[0]?.tip || '').trim();
+            if (!text) {
+                return;
+            }
+
+            speakText({ text, accentStyle, rate: 0.95 });
+            lastVoiceFeedbackAtRef.current = now;
+            pendingVoiceFeedbackRef.current = null;
+        }, FEEDBACK_VOICE_INTERVAL_MS);
+
+        return () => {
+            if (voiceFeedbackIntervalRef.current) {
+                window.clearInterval(voiceFeedbackIntervalRef.current);
+                voiceFeedbackIntervalRef.current = null;
+            }
+        };
+    }, [accentStyle, callState]);
 
     const playNextPartnerChunk = async () => {
         if (isPlayingPartnerAudioRef.current) {
@@ -261,8 +465,10 @@ const Rooms = () => {
         }
     };
 
-    const stopSpeaking = () => {
-        socketRef.current?.emit('audio-stream-end');
+    const stopSpeaking = async (notifyServer = true) => {
+        if (notifyServer) {
+            socketRef.current?.emit('audio-stream-end');
+        }
 
         if (relayRecorderRef.current && relayRecorderRef.current.state !== 'inactive') {
             relayRecorderRef.current.stop();
@@ -306,6 +512,9 @@ const Rooms = () => {
         }
 
         const micContext = micContextRef.current;
+        if (micContext.state === 'suspended') {
+            await micContext.resume();
+        }
         const source = micContext.createMediaStreamSource(stream);
         const processor = micContext.createScriptProcessor(4096, 1, 1);
         source.connect(processor);
@@ -328,7 +537,7 @@ const Rooms = () => {
             }
             const rms = Math.sqrt(sum / inputData.length);
             const normalized = Math.min(1, rms * 6 + 0.08);
-            setWaveformSamples((current) => [...current.slice(-27), normalized]);
+            pushWaveformSample(normalized);
 
             const pcmData = pcmFloat32ToBase64(inputData);
             socket.emit('audio-stream', {
@@ -337,7 +546,13 @@ const Rooms = () => {
             });
         };
 
-        const relayRecorder = new MediaRecorder(stream, { mimeType: relayMimeType });
+        const preferredMimeType = getRelayMimeType();
+        let relayRecorder: MediaRecorder;
+        try {
+            relayRecorder = preferredMimeType ? new MediaRecorder(stream, { mimeType: preferredMimeType }) : new MediaRecorder(stream);
+        } catch {
+            relayRecorder = new MediaRecorder(stream);
+        }
         relayRecorder.ondataavailable = async (event) => {
             if (!event.data.size || isMutedRef.current || !isRoomActiveRef.current) {
                 return;
@@ -347,7 +562,7 @@ const Rooms = () => {
                 const mediaData = await blobToBase64(event.data);
                 socket.emit('audio-stream', {
                     mediaData,
-                    mediaMimeType: event.data.type || relayMimeType,
+                    mediaMimeType: event.data.type || preferredMimeType || 'audio/webm',
                 });
             } catch {
                 setErrorMessage('Could not process a microphone chunk for room audio.');
@@ -362,32 +577,6 @@ const Rooms = () => {
         relayRecorderRef.current = relayRecorder;
         setIsMicActive(true);
         setCallStatus('Microphone live');
-    };
-
-    const joinQueue = () => {
-        if (!socketRef.current) {
-            setErrorMessage('Room connection is still initializing.');
-            return;
-        }
-
-        if (!isSocketConnected) {
-            socketRef.current.connect();
-            setErrorMessage('Trying to reconnect to the room server...');
-            return;
-        }
-
-        setInviteUrl('');
-        setTranscripts([]);
-        setFeedbackItems([]);
-        setLiveTip(null);
-        setLastAudioSentAt(null);
-        setLastGeminiAudioAt(null);
-        setLastTranscriptAt(null);
-        setLastTranscriptText('');
-        setCallState('queueing');
-        setCallStatus('Joining anonymous queue...');
-        setErrorMessage(null);
-        socketRef.current.emit('join-queue', { name: user?.name || 'Guest' });
     };
 
     const createInvite = () => {
@@ -405,6 +594,7 @@ const Rooms = () => {
         setTranscripts([]);
         setFeedbackItems([]);
         setLiveTip(null);
+        pendingTranscriptEntriesRef.current = [];
         setLastAudioSentAt(null);
         setLastGeminiAudioAt(null);
         setLastTranscriptAt(null);
@@ -426,14 +616,36 @@ const Rooms = () => {
         }
     };
 
+    const shareInviteLink = async () => {
+        if (!inviteUrl) {
+            return;
+        }
+
+        try {
+            if (navigator.share) {
+                await navigator.share({
+                    title: 'Join my Sonara room',
+                    text: 'Join my Sonara pronunciation room.',
+                    url: inviteUrl,
+                });
+                setCallStatus('Invite link shared');
+                return;
+            }
+
+            await copyInviteLink();
+        } catch {
+            setErrorMessage('Could not share the invite link.');
+        }
+    };
+
     const toggleMicrophone = async () => {
         if (!roomId || callState !== 'connected') {
-            setErrorMessage('Match with someone or open a shared room before turning on the microphone.');
+            setErrorMessage('Create or join a room before turning on the microphone.');
             return;
         }
 
         if (isMicActive) {
-            stopSpeaking();
+            await stopSpeaking();
             setCallStatus('Microphone paused');
             return;
         }
@@ -445,15 +657,34 @@ const Rooms = () => {
         }
     };
 
-    const leaveRoom = () => {
-        stopSpeaking();
+    const leaveRoom = async () => {
+        await stopSpeaking(false);
+        await releaseMicrophone();
+        resetPartnerAudioQueue();
+        stopTts();
         socketRef.current?.emit('leave-room');
         setRoomId(null);
         setInviteUrl('');
-        setPartnerLabel('Waiting for match');
+        setPartnerLabel('Waiting for your friend');
         isRoomActiveRef.current = false;
         setCallState('ended');
         setCallStatus('You left the room');
+    };
+
+    const submitCoachQuestion = () => {
+        if (!roomId || !socketRef.current) {
+            setErrorMessage('Join a room before asking Gemini.');
+            return;
+        }
+
+        const question = coachQuestion.trim();
+        if (!question) {
+            return;
+        }
+
+        setIsAskingCoach(true);
+        socketRef.current.emit('coach-question', { text: question });
+        setCoachQuestion('');
     };
 
     const primaryFeedback = feedbackItems[0];
@@ -461,6 +692,9 @@ const Rooms = () => {
     const showInviteButton = !inviteParam && !inviteUrl && !roomId;
     const formatStamp = (value: string | null) =>
         value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Waiting';
+    const formatTranscriptStamp = (value: string) =>
+        new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const feedbackRows: PronunciationFeedbackRow[] = primaryFeedback?.rows ?? [];
 
     return (
         <div className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(194,230,222,0.28),_transparent_28%),linear-gradient(180deg,_#fbfbfa_0%,_#f3efe8_100%)] pt-36 pb-20">
@@ -472,7 +706,7 @@ const Rooms = () => {
                                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-400">Rooms</p>
                                 <h1 className="mt-2 text-[34px] font-dm-sans font-semibold tracking-tight text-[#111]">Live Conversation Room</h1>
                                 <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-500">
-                                    Match with another learner or share a direct room link, then speak live while Gemini listens for grammar and pronunciation coaching.
+                                    Create a private room, share the invite, and speak live while Gemini listens for pronunciation and grammar coaching.
                                 </p>
                             </div>
 
@@ -495,7 +729,7 @@ const Rooms = () => {
                                         <div>
                                             <p className="text-xs uppercase tracking-[0.22em] text-white/60">Voice call</p>
                                             <div className="mt-2 flex items-center gap-3">
-                                                <span className={`h-3 w-3 rounded-full ${callState === 'connected' ? 'bg-emerald-400' : callState === 'queueing' || callState === 'waiting-link' ? 'bg-amber-300' : 'bg-white/50'}`} />
+                                                <span className={`h-3 w-3 rounded-full ${callState === 'connected' ? 'bg-emerald-400' : callState === 'waiting-link' ? 'bg-amber-300' : 'bg-white/50'}`} />
                                                 <p className="text-lg font-medium">{callStatus}</p>
                                             </div>
                                         </div>
@@ -505,17 +739,6 @@ const Rooms = () => {
                                     </div>
 
                                     <div className="mt-6 flex flex-wrap gap-3">
-                                        <button
-                                            onClick={joinQueue}
-                                            disabled={!!roomId || !isSocketConnected}
-                                            className={`rounded-full px-5 py-3 text-sm font-medium transition-all ${
-                                                !!roomId || !isSocketConnected
-                                                    ? 'cursor-not-allowed bg-white/10 text-white/50'
-                                                    : 'bg-white text-[#111] hover:bg-neutral-100'
-                                            }`}
-                                        >
-                                            Find partner
-                                        </button>
                                         {showInviteButton && (
                                             <button
                                                 onClick={createInvite}
@@ -526,16 +749,24 @@ const Rooms = () => {
                                                         : 'border border-white/15 bg-white/10 text-white hover:bg-white/15'
                                                 }`}
                                             >
-                                                Create invite link
+                                                Create room
                                             </button>
                                         )}
                                         {inviteUrl && (
-                                            <button
-                                                onClick={() => void copyInviteLink()}
-                                                className="rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition-all hover:bg-white/15"
-                                            >
-                                                Copy invite link
-                                            </button>
+                                            <>
+                                                <button
+                                                    onClick={() => void copyInviteLink()}
+                                                    className="rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition-all hover:bg-white/15"
+                                                >
+                                                    Copy invite link
+                                                </button>
+                                                <button
+                                                    onClick={() => void shareInviteLink()}
+                                                    className="rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition-all hover:bg-white/15"
+                                                >
+                                                    Share with friend
+                                                </button>
+                                            </>
                                         )}
                                     </div>
 
@@ -664,7 +895,6 @@ const Rooms = () => {
 
                                         <div className="rounded-full border border-white/15 bg-white/10 px-4 py-3 text-sm text-white/80">
                                             {callState === 'idle' && 'Pick a room option first'}
-                                            {callState === 'queueing' && 'Searching for another learner'}
                                             {callState === 'waiting-link' && 'Share your invite link and wait for them to join'}
                                             {callState === 'connected' && (isMicActive ? 'Mic live' : 'Room ready for speech')}
                                             {callState === 'ended' && 'Start again when you are ready'}
@@ -684,8 +914,8 @@ const Rooms = () => {
                                         </button>
 
                                         <button
-                                            onClick={leaveRoom}
-                                            disabled={!roomId && callState !== 'queueing' && callState !== 'waiting-link'}
+                                            onClick={() => void leaveRoom()}
+                                            disabled={!roomId && callState !== 'waiting-link'}
                                             className="flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-5 py-3 text-sm font-medium text-white transition-all hover:bg-white/15"
                                         >
                                             <Icon icon="solar:phone-bold-duotone" width="18" className="rotate-[135deg]" />
@@ -699,22 +929,19 @@ const Rooms = () => {
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">Transcript</p>
-                                        <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Conversation Feed</h2>
+                                        <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Unified Transcript</h2>
                                     </div>
                                     <div className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-500">
                                         {transcripts.length} entries
                                     </div>
                                 </div>
 
-                                <div className="mt-5 space-y-3">
+                                <div ref={transcriptPanelRef} className="mt-5 max-h-[460px] space-y-4 overflow-y-auto rounded-[24px] border border-neutral-200 bg-white p-4">
                                     {transcripts.length > 0 ? transcripts.map((entry) => (
-                                        <div key={entry.id} className="rounded-[22px] border border-neutral-200 bg-neutral-50/70 px-4 py-3">
-                                            <div className="flex items-center justify-between gap-4">
-                                                <p className="text-sm font-semibold text-[#111]">{entry.speakerLabel}</p>
-                                                <p className="text-xs text-neutral-400">
-                                                    {new Date(entry.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                </p>
-                                            </div>
+                                        <div key={entry.id} className="border-b border-neutral-100 pb-4 last:border-b-0 last:pb-0">
+                                            <p className="text-sm font-semibold text-[#111]">
+                                                {entry.speakerLabel} <span className="font-normal text-neutral-400">— {formatTranscriptStamp(entry.createdAt)}</span>
+                                            </p>
                                             <p className="mt-2 text-sm leading-relaxed text-neutral-600">{entry.transcript}</p>
                                         </div>
                                     )) : (
@@ -731,7 +958,7 @@ const Rooms = () => {
                                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">AI Coach</p>
                                 <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Speaker Feedback</h2>
                                 <p className="mt-2 text-sm leading-relaxed text-neutral-500">
-                                    Gemini analyzes your speech privately and returns your transcript, correction, and pronunciation tip here.
+                                    Gemini analyzes your final speech turn and returns your transcript plus pronunciation coaching here.
                                 </p>
 
                                 <div className="mt-6 space-y-4">
@@ -749,6 +976,38 @@ const Rooms = () => {
                                                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-600">Pronunciation tip</p>
                                                 <p className="mt-2 text-sm leading-relaxed text-sky-900">{primaryFeedback.pronunciationTip || 'Keep the rhythm smooth and finish each word clearly.'}</p>
                                             </div>
+                                            <div className="overflow-hidden rounded-[24px] border border-neutral-200 bg-white">
+                                                <div className="overflow-x-auto">
+                                                    <table className="min-w-full text-left text-sm">
+                                                        <thead className="bg-neutral-50 text-neutral-500">
+                                                            <tr>
+                                                                <th className="px-4 py-3 font-medium">Word</th>
+                                                                <th className="px-4 py-3 font-medium">Your Pronunciation</th>
+                                                                <th className="px-4 py-3 font-medium">Correct Pronunciation</th>
+                                                                <th className="px-4 py-3 font-medium">Phonetic</th>
+                                                                <th className="px-4 py-3 font-medium">Tip</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {feedbackRows.length > 0 ? feedbackRows.map((row, index) => (
+                                                                <tr key={`${row.word}-${index}`} className="border-t border-neutral-100 align-top">
+                                                                    <td className="px-4 py-3 font-medium text-[#111]">{row.word}</td>
+                                                                    <td className="px-4 py-3 text-neutral-600">{row.userPronunciation || 'Close to target'}</td>
+                                                                    <td className="px-4 py-3 text-neutral-600">{row.correctPronunciation || 'Natural pronunciation'}</td>
+                                                                    <td className="px-4 py-3 font-mono text-xs text-neutral-500">{row.phonetic || '—'}</td>
+                                                                    <td className="px-4 py-3 text-neutral-600">{row.tip || 'Keep the word smooth and clear.'}</td>
+                                                                </tr>
+                                                            )) : (
+                                                                <tr className="border-t border-neutral-100">
+                                                                    <td colSpan={5} className="px-4 py-4 text-neutral-500">
+                                                                        No major pronunciation issues detected in the final transcript.
+                                                                    </td>
+                                                                </tr>
+                                                            )}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
                                         </>
                                     ) : (
                                         <div className="rounded-[24px] border border-dashed border-neutral-200 bg-white/75 p-6 text-center">
@@ -756,8 +1015,50 @@ const Rooms = () => {
                                                 <Icon icon="solar:stars-line-duotone" width="24" />
                                             </div>
                                             <p className="mt-4 text-sm leading-relaxed text-neutral-500">
-                                                Once the room is connected, tap the mic and start speaking. Gemini will stream coaching here.
+                                                Once the room is connected, tap the mic and finish speaking. Gemini will return final transcript and pronunciation feedback here.
                                             </p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="mt-6 rounded-[24px] border border-neutral-200 bg-white p-4">
+                                    <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400">Ask Gemini</p>
+                                    <div className="mt-3 flex flex-col gap-3">
+                                        <input
+                                            type="text"
+                                            value={coachQuestion}
+                                            onChange={(event) => setCoachQuestion(event.target.value)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter') {
+                                                    submitCoachQuestion();
+                                                }
+                                            }}
+                                            placeholder="Ask about words to improve..."
+                                            className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm text-neutral-700 shadow-sm focus:border-emerald-200 focus:outline-none"
+                                        />
+                                        <button
+                                            onClick={submitCoachQuestion}
+                                            disabled={!roomId || isAskingCoach}
+                                            className={`rounded-full px-5 py-3 text-sm font-medium transition-all ${
+                                                !roomId || isAskingCoach
+                                                    ? 'cursor-not-allowed bg-neutral-100 text-neutral-400'
+                                                    : 'border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                                            }`}
+                                        >
+                                            {isAskingCoach ? 'Asking Gemini...' : 'Ask Gemini'}
+                                        </button>
+                                    </div>
+                                    {coachMessages.length > 0 && (
+                                        <div className="mt-4 space-y-3">
+                                            {coachMessages.map((msg) => (
+                                                <div key={msg.id} className={`rounded-[18px] px-3 py-2 text-sm ${
+                                                    msg.role === 'ai'
+                                                        ? 'bg-emerald-50 text-emerald-900'
+                                                        : 'bg-neutral-100 text-neutral-700'
+                                                }`}>
+                                                    {msg.text}
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
                                 </div>

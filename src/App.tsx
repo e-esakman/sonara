@@ -12,6 +12,7 @@ import ReadingViewer from './pages/ReadingViewer';
 import Login from './pages/Login';
 import Grammar from './pages/Grammar';
 import Rooms from './pages/Rooms';
+import RoomsErrorBoundary from './components/RoomsErrorBoundary';
 
 function App() {
   return (
@@ -23,7 +24,7 @@ function App() {
             <Route index element={<Home />} />
             <Route path="dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
             <Route path="practice" element={<ProtectedRoute><Practice /></ProtectedRoute>} />
-            <Route path="rooms" element={<ProtectedRoute><Rooms /></ProtectedRoute>} />
+            <Route path="rooms" element={<ProtectedRoute><RoomsErrorBoundary><Rooms /></RoomsErrorBoundary></ProtectedRoute>} />
             <Route path="grammar" element={<ProtectedRoute><Grammar /></ProtectedRoute>} />
             <Route path="library" element={<ProtectedRoute><Library /></ProtectedRoute>} />
             <Route path="read/:id" element={<ProtectedRoute><ReadingViewer /></ProtectedRoute>} />

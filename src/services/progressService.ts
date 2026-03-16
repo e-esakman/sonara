@@ -1,4 +1,4 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+import { getRequiredBackendUrl } from './backendConfig';
 
 export interface SessionData {
     text: string;
@@ -17,7 +17,8 @@ export interface ProgressData {
 
 export const saveSession = async (session: SessionData): Promise<void> => {
     try {
-        await fetch(`${BACKEND_URL}/session`, {
+        const backendUrl = getRequiredBackendUrl();
+        await fetch(`${backendUrl}/session`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -31,8 +32,9 @@ export const saveSession = async (session: SessionData): Promise<void> => {
 
 export const getProgress = async (userId: string = 'anonymous'): Promise<ProgressData | null> => {
     try {
+        const backendUrl = getRequiredBackendUrl();
         const encodedUserId = encodeURIComponent(userId);
-        const response = await fetch(`${BACKEND_URL}/progress?userId=${encodedUserId}`);
+        const response = await fetch(`${backendUrl}/progress?userId=${encodedUserId}`);
         if (!response.ok) {
             throw new Error(`Error: ${response.statusText}`);
         }
