@@ -1,4 +1,4 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8080';
+import { getRequiredBackendUrl } from './backendConfig';
 
 export interface WordStatus {
     word: string;
@@ -101,8 +101,9 @@ export const analyzePronunciation = async (
     }
 
     try {
+        const backendUrl = getRequiredBackendUrl();
         const response = await fetchWithRetry(
-            `${BACKEND_URL}/analyze`,
+            `${backendUrl}/analyze`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -128,6 +129,9 @@ export const analyzePronunciation = async (
 
         return data;
     } catch (error) {
+        if (error instanceof Error && error.message.includes('VITE_BACKEND_URL')) {
+            throw error;
+        }
         console.warn('Backend API unavailable, using mock AI evaluation.');
         // Mock fallback if backend is not running or Gemini API fails
         const words = expectedText.split(/\s+/);

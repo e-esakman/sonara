@@ -14,13 +14,20 @@ const app = express();
 const port = process.env.PORT || 8080;
 
 const allowedOrigins = new Set(
-    (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173')
+    (process.env.CORS_ORIGINS || process.env.CORS_ORIGIN || 'http://localhost:5173,http://localhost:5174')
         .split(',')
         .map(o => o.trim())
         .filter(Boolean)
 );
 app.use(cors({
-    origin: true,
+    origin: (origin, cb) => {
+        if (!origin || allowedOrigins.has(origin)) {
+            cb(null, true);
+            return;
+        }
+
+        cb(new Error('CORS blocked'));
+    },
     credentials: true
 }));
 app.use(express.json());

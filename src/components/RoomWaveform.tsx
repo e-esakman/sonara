@@ -21,7 +21,7 @@ const RoomWaveform = ({ samples, active }: RoomWaveformProps) => {
                     const height = 18 + normalized * 52;
                     return (
                         <div
-                            key={`${index}-${sample}`}
+                            key={index}
                             className={`w-[calc((100%-27px)/28)] min-w-[3px] rounded-full transition-all duration-150 ${
                                 active ? 'bg-gradient-to-t from-[#8ad6c2] via-[#d8f7ef] to-white' : 'bg-white/25'
                             }`}
