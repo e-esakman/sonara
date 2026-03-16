@@ -1,4 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
+import { getRequiredBackendUrl } from './backendConfig';
 
 export type RoomReadyPayload = {
     roomId: string;
@@ -28,6 +29,7 @@ export type AIFeedback = {
     correction: string;
     pronunciationTip: string;
     createdAt: string;
+    rows?: PronunciationFeedbackRow[];
 };
 
 export type AITip = {
@@ -35,18 +37,19 @@ export type AITip = {
     createdAt: string;
 };
 
-const browserBackendUrl =
-    typeof window !== 'undefined'
-        ? `${window.location.protocol}//${window.location.hostname}:8080`
-        : 'http://localhost:8080';
-
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || browserBackendUrl;
+export type PronunciationFeedbackRow = {
+    word: string;
+    userPronunciation: string;
+    correctPronunciation: string;
+    phonetic: string;
+    tip: string;
+};
 
 export function createConversationRoomSocket(): Socket {
-    return io(BACKEND_URL, {
+    return io(getRequiredBackendUrl(), {
         withCredentials: true,
         reconnection: true,
-        transports: ['polling'],
+        transports: ['websocket', 'polling'],
     });
 }
 

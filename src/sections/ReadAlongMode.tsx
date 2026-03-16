@@ -187,8 +187,8 @@ const ReadAlongMode = ({ passage }: Props) => {
                     className += ' ring-2 ring-indigo-400 bg-indigo-50 px-1 rounded';
                 }
                 return (
-                    <span key={idx} className={className} style={{ marginRight: '0.3em', whiteSpace: 'nowrap' }}>
-                        {word}
+                    <span key={idx} className={className}>
+                        {word}{' '}
                     </span>
                 );
             });
@@ -224,10 +224,9 @@ const ReadAlongMode = ({ passage }: Props) => {
                 <span
                     key={idx}
                     className={className}
-                    style={{ marginRight: '0.3em', whiteSpace: 'nowrap' }}
                     title={isIncorrect ? 'Mispronounced' : isUnclear ? 'Unclear' : isUnread ? 'Unread' : 'Correct'}
                 >
-                    {word}
+                    {word}{' '}
                 </span>
             );
         });
@@ -290,18 +289,18 @@ const ReadAlongMode = ({ passage }: Props) => {
                     </div>
 
                     {/* Text body — custom text input or passage */}
-                    <div className="relative z-10 bg-neutral-50 rounded-2xl p-5 sm:p-6 border border-neutral-100 mb-6 min-h-[180px] max-w-full overflow-hidden">
+                    <div className="relative z-10 mb-6 min-h-[180px] max-w-full overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50 p-5 sm:p-6" style={{ lineHeight: 1.6, maxWidth: '60ch', wordBreak: 'normal', margin: '0 auto' }}>
                         {passage.id === 'custom' ? (
                             <textarea
                                 value={customText}
                                 onChange={e => setCustomText(e.target.value)}
                                 placeholder="Type or paste the text you want to practice reading..."
-                                className="w-full min-h-[200px] bg-transparent text-base sm:text-lg font-sans leading-relaxed text-neutral-700 resize-none outline-none placeholder:text-neutral-400"
+                                className="mx-auto block min-h-[200px] w-full max-w-[60ch] resize-none bg-transparent text-base font-sans leading-[1.6] text-neutral-700 outline-none placeholder:text-neutral-400 sm:text-lg"
                             />
                         ) : (
                             <p
-                                className={`text-base sm:text-lg font-sans max-w-full ${autismMode ? 'leading-loose tracking-wide text-lg' : 'leading-relaxed'}`}
-                                style={{ overflowWrap: 'anywhere', wordBreak: 'keep-all', whiteSpace: 'normal', hyphens: 'none' }}
+                                className={`mx-auto max-w-[60ch] text-base font-sans sm:text-lg ${autismMode ? 'text-lg leading-[1.8] tracking-wide' : 'leading-[1.6]'}`}
+                                style={{ overflowWrap: 'normal', wordBreak: 'normal', whiteSpace: 'normal', hyphens: 'none' }}
                             >
                                 {highlightedTextNodes}
                             </p>

@@ -22,6 +22,15 @@ declare global {
 // Maximum allowed recording duration (2 minutes)
 const MAX_RECORDING_MS = 120_000;
 
+function getSupportedRecordingMimeType() {
+    if (typeof MediaRecorder === 'undefined') {
+        return '';
+    }
+
+    const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
+    return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? '';
+}
+
 interface SpeechRecognitionOptions {
     continuous?: boolean;
     interimResults?: boolean;
@@ -139,7 +148,13 @@ export const useSpeechRecognition = (options: SpeechRecognitionOptions = {}) => 
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
 
                 // Set up MediaRecorder to capture the recording
-                const mediaRecorder = new MediaRecorder(stream);
+                let mediaRecorder: MediaRecorder;
+                const preferredMimeType = getSupportedRecordingMimeType();
+                try {
+                    mediaRecorder = preferredMimeType ? new MediaRecorder(stream, { mimeType: preferredMimeType }) : new MediaRecorder(stream);
+                } catch {
+                    mediaRecorder = new MediaRecorder(stream);
+                }
                 audioChunksRef.current = [];
                 setAudioUrl(null);
 
@@ -150,7 +165,8 @@ export const useSpeechRecognition = (options: SpeechRecognitionOptions = {}) => 
                 };
 
                 mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                    const blobType = mediaRecorder.mimeType || preferredMimeType || 'audio/webm';
+                    const audioBlob = new Blob(audioChunksRef.current, { type: blobType });
                     const url = URL.createObjectURL(audioBlob);
                     setAudioUrl(url);
                     // Stop tracks to release microphone
