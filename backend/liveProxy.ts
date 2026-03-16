@@ -13,12 +13,22 @@ When users speak English sentences:
 
 Keep responses short and conversational.`;
 
+const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL;
+
 export function setupLiveProxy(server: Server) {
-    const wss = new WebSocketServer({ server, path: '/live-ws' });
+    const wss = new WebSocketServer({ noServer: true });
+
+    server.on('upgrade', (request, socket, head) => {
+        if (request.url === '/live-ws') {
+            wss.handleUpgrade(request, socket, head, (ws) => {
+                wss.emit('connection', ws, request);
+            });
+        }
+    });
 
     wss.on('connection', async (clientWs: WebSocket) => {
         const apiKey = process.env.GEMINI_LIVEVOICE_KEY || process.env.GEMINI_API_KEY;
-        if (!apiKey) {
+        if (!apiKey || !LIVE_MODEL) {
             clientWs.close(1011, 'Server misconfigured: missing API key');
             return;
         }
@@ -29,7 +39,7 @@ export function setupLiveProxy(server: Server) {
 
         try {
             geminiSession = await ai.live.connect({
-                model: 'gemini-2.5-flash-native-audio-latest',
+                model: LIVE_MODEL,
                 callbacks: {
                     onopen: () => {
                         console.log('[LiveProxy] Gemini session opened');
@@ -76,9 +86,16 @@ export function setupLiveProxy(server: Server) {
                     turnComplete?: boolean;
                 };
                 if (msg.type === 'audio') {
-                    geminiSession.sendRealtimeInput({
-                        audio: { data: msg.data ?? '', mimeType: msg.mimeType ?? 'audio/pcm;rate=16000' }
-                    });
+                    try {
+                        geminiSession.sendRealtimeInput({
+                            audio: { 
+                                data: msg.data ?? '', 
+                                mimeType: msg.mimeType ?? 'audio/pcm;rate=16000' 
+                            }
+                        });
+                    } catch(sendErr) {
+                         console.error('[LiveProxy] Gemini sendRealtimeInput error:', sendErr);
+                    }
                 } else if (msg.type === 'audioEnd') {
                     // (Optional) geminiSession.sendRealtimeInput([{ ... }]) handles stream ends. We can ignore explicit audioEnd or pass empty array
                 } else if (msg.type === 'clientContent' && msg.turnComplete) {

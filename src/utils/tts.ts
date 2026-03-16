@@ -8,6 +8,12 @@ interface SpeakOptions {
     onEnd?: () => void;
 }
 
+const isSafari = () => {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent;
+    return /Safari/i.test(ua) && !/Chrome|Chromium|Edg/i.test(ua);
+};
+
 const getVoice = (accentStyle: AccentStyle): SpeechSynthesisVoice | null => {
     const voices = window.speechSynthesis.getVoices();
     if (voices.length === 0) return null;
@@ -24,6 +30,16 @@ const getVoice = (accentStyle: AccentStyle): SpeechSynthesisVoice | null => {
         case 'Indian':
             targetVoices = voices.filter(v => v.lang.includes('en-IN') || v.lang.includes('hi-IN'));
             break;
+    }
+
+    if (isSafari()) {
+        const preferredNames = [
+            'Samantha', 'Alex', 'Karen', 'Daniel', 'Moira', 'Tessa', 'Oliver', 'Serena', 'Rishi', 'Veena',
+        ];
+        const preferredSafari = [...targetVoices, ...voices].find(voice =>
+            preferredNames.some(name => voice.name.includes(name))
+        );
+        if (preferredSafari) return preferredSafari;
     }
 
     // Prefer non-local service voices if available for better quality, but fallback to any

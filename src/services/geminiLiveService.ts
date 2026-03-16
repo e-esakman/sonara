@@ -6,7 +6,20 @@ type GeminiServerContent = {
 };
 type GeminiServerMessage = { serverContent?: GeminiServerContent };
 
-const BACKEND_WS_URL = import.meta.env.VITE_BACKEND_WS_URL || 'ws://localhost:8080/live-ws';
+import { getRequiredBackendUrl } from './backendConfig';
+
+function getWebsocketUrl() {
+    if (import.meta.env.VITE_BACKEND_WS_URL) {
+        return import.meta.env.VITE_BACKEND_WS_URL;
+    }
+    const httpUrl = getRequiredBackendUrl();
+    if (httpUrl.startsWith('https://')) {
+        return httpUrl.replace('https://', 'wss://') + '/live-ws';
+    }
+    return httpUrl.replace('http://', 'ws://') + '/live-ws';
+}
+
+const BACKEND_WS_URL = getWebsocketUrl();
 
 class GeminiLiveService {
     private ws: WebSocket | null = null;
