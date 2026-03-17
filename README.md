@@ -1,4 +1,5 @@
 # Sonara – AI Pronunciation Coach
+Built for Gemini Live Agent Challenge (Live Agents Category)
 
 Sonara is a real-time, AI-powered pronunciation coaching app.  Speak a passage and
 receive instant, word-level feedback on accuracy, fluency, and accent – powered by
@@ -17,9 +18,9 @@ Google Gemini.
 | 📊 **Analytics** | Track accuracy, fluency, WPM, and streak over time |
 | 🌍 **Accent Support** | American, British, and Indian English accent coaching |
 | ♿ **Accessibility modes** | Focus mode and autism-friendly display options |
-| **Live Conversation Rooms** | Two users can speak together while each receives private AI coaching
-| **Read-Along** | Practice Users read passages aloud and receive word-level pronunciation feedback
-| **Grammar Coach** | Submit sentences and receive corrections, explanations, and examples
+| **Live Conversation Rooms** | Two users can speak together while each receives private AI coaching |
+| **Read-Along** | Practice Users read passages aloud and receive word-level pronunciation feedback |
+| **Grammar Coach** | Submit sentences and receive corrections, explanations, and examples |
 
 ---
 
@@ -37,7 +38,58 @@ Google Gemini.
 
 ---
 
-## Quick Start
+### Problem
+Improving spoken English is difficult because most existing tools are **not built for real-time interaction**.
+
+- Feedback is delayed users only know mistakes *after* speaking  
+- No support for **natural conversations** (interruptions, back-and-forth)  
+- Limited focus on **pronunciation and fluency together**  
+- Practice feels artificial, not like talking to a real person  
+
+As a result, users struggle to build **confidence in speaking**, even if they understand the language.
+
+### How Sonara Solves This
+### 🎧 Real-Time Feedback
+Instead of waiting for results, Sonara:
+- analyzes speech **as you speak**
+- highlights mispronounced words instantly  
+
+---
+
+### 🗣️ Live AI Conversations
+Using Gemini Live API:
+- users can **talk naturally**
+- interrupt anytime  
+- receive **continuous coaching responses**
+
+---
+
+### 👥 Conversation Rooms
+- Two users can speak together  
+- AI listens in the background  
+- Provides **private, personalized feedback** to each speaker  
+
+#### Sonara is a real-time multimodal AI agent:
+
+Audio → Text → AI → UI Feedback <br>
+Real-time vs Batch <br>
+/live-ws → Real-time streaming (Gemini Live) <br>
+/analyze → Batch pronunciation analysis <br>
+
+<img width="789" height="1076" alt="image" src="https://github.com/user-attachments/assets/0d1dc521-5aa1-4781-ae70-f920454a1dd1" />
+<br>
+
+( Sonara enables real-time conversations between users while the AI continuously analyzes pronunciation in the background and provides live feedback. )  <br>
+
+Sonara backend is deployed on **Google Cloud Run**.
+
+🎥 **Deployment Proof:**  <br>
+https://youtu.be/XPV0fWwfG5o  <br>
+
+⚙️ **Automated Deployment Script:**  <br>
+https://github.com/e-esakman/sonara/blob/main/deploy.sh <br>
+
+## Quick Start and Testing
 
 ### 1 – Clone and install
 
