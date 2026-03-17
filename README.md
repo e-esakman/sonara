@@ -4,6 +4,7 @@ Sonara is a real-time, AI-powered pronunciation coaching app.  Speak a passage a
 receive instant, word-level feedback on accuracy, fluency, and accent – powered by
 Google Gemini.
 
+<img width="587" height="487" alt="Screenshot 2026-03-18 at 2 12 56 AM" src="https://github.com/user-attachments/assets/02666eb1-3e49-473c-8390-f99e15f2c95d" />
 
 ---
 
@@ -16,28 +17,15 @@ Google Gemini.
 | 📊 **Analytics** | Track accuracy, fluency, WPM, and streak over time |
 | 🌍 **Accent Support** | American, British, and Indian English accent coaching |
 | ♿ **Accessibility modes** | Focus mode and autism-friendly display options |
+| **Live Conversation Rooms** | Two users can speak together while each receives private AI coaching
+| **Read-Along** | Practice Users read passages aloud and receive word-level pronunciation feedback
+| **Grammar Coach** | Submit sentences and receive corrections, explanations, and examples
 
 ---
 
 ## Architecture
 
-```
-┌──────────────────────────────────┐    ┌────────────────────────────────────┐
-│         Frontend (React)         │    │         Backend (Express)          │
-│                                  │    │                                    │
-│  pronunciationService  ──POST──► │    │  /analyze ──► Analysis Pipeline   │
-│  progressService       ──REST──► │    │  /session / /progress ──► Firebase│
-│  geminiLiveService     ──WS───► │    │  /live-ws ──► Gemini Live Proxy    │
-└──────────────────────────────────┘    └────────────────────────────────────┘
-                                                          │
-                                              GEMINI_API_KEY (server-side only)
-                                                          │
-                                                  Google Gemini API
-```
-
-> **Security note:** The Gemini API key never leaves the server.  The frontend
-> connects to the backend WebSocket proxy (`/live-ws`) which forwards audio to
-> Gemini on the server side.
+<img width="1536" height="1024" alt="aaaa3" src="https://github.com/user-attachments/assets/09166cca-8d98-47f1-83ba-3de29612a8da" />
 
 ---
 
