@@ -4,6 +4,7 @@ Sonara is a real-time, AI-powered pronunciation coaching app.  Speak a passage a
 receive instant, word-level feedback on accuracy, fluency, and accent – powered by
 Google Gemini.
 
+
 ---
 
 ## Features
