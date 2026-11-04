@@ -163,7 +163,15 @@ Rules:
     }
 }
 
-function extractSpeakCorrectWords(parsed: any): string[] {
+interface FeedbackPayload {
+    speakCorrectWords?: unknown[];
+    problem_words?: { word?: string; tip?: string }[];
+    word_analysis?: { word?: string; status?: string }[];
+    phoneticBreakdown?: Record<string, string>;
+    coach_message?: string | unknown[];
+}
+
+function extractSpeakCorrectWords(parsed: FeedbackPayload): string[] {
     const explicit = Array.isArray(parsed?.speakCorrectWords) ? parsed.speakCorrectWords : [];
     const explicitStrings = explicit.filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0);
 
@@ -172,24 +180,24 @@ function extractSpeakCorrectWords(parsed: any): string[] {
     }
 
     const wordsFromProblems = Array.isArray(parsed?.problem_words)
-        ? parsed.problem_words.map((item: any) => item?.word).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
+        ? parsed.problem_words.map((item) => item?.word).filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
         : [];
 
     const wordsFromAnalysis = Array.isArray(parsed?.word_analysis)
         ? parsed.word_analysis
-            .filter((item: any) => typeof item?.status === 'string' && item.status.toLowerCase() === 'incorrect')
-            .map((item: any) => item?.word)
+            .filter((item) => typeof item?.status === 'string' && item.status.toLowerCase() === 'incorrect')
+            .map((item) => item?.word)
             .filter((value: unknown): value is string => typeof value === 'string' && value.trim().length > 0)
         : [];
 
     return [...new Set([...wordsFromProblems, ...wordsFromAnalysis])];
 }
 
-function buildCoachMessage(parsed: any): string {
+function buildCoachMessage(parsed: FeedbackPayload): string {
     const problemWords = Array.isArray(parsed?.problem_words) ? parsed.problem_words : [];
     const phoneticBreakdown = parsed?.phoneticBreakdown || {};
 
-    const blocks = problemWords.slice(0, 3).map((item: any) => {
+    const blocks = problemWords.slice(0, 3).map((item) => {
         const word = typeof item?.word === 'string' ? item.word : '';
         if (!word) {
             return '';

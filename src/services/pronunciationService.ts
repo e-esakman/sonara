@@ -55,7 +55,8 @@ async function fetchWithRetry(
             }
 
             return response;
-        } catch (error: any) {
+        } catch (caught: unknown) {
+            const error = caught instanceof Error ? caught : new Error(String(caught));
             lastError = error;
 
             // Only retry on network errors or 503, not on other errors

@@ -1,6 +1,6 @@
 # Sonara pronunciation-focused revision
 
-The main experience now has two choices: solo AI conversations and two-person practice calls with private pronunciation feedback. Reading, library, grammar, dashboard, and analytics routes are removed from navigation and routing. The old modules remain in source for a separate cleanup, but are no longer shipped as reachable features. Accessibility and accent preferences remain available.
+The main experience now has two choices: solo AI conversations and two-person practice calls with private pronunciation feedback. Reading, library, grammar, dashboard, and analytics routes are removed from navigation and routing. The retired pages, reading content, demo components, grammar/progress endpoints, and Firebase storage have been deleted. Unused dependencies and legacy recording helpers have also been removed. Accessibility and accent preferences remain available.
 
 ## Run locally
 
@@ -32,4 +32,4 @@ The room integration test runs two real Socket.IO clients against a local server
 
 Before release, use two devices with headphones to test an invite, permission denial, joining audio on both sides, full-duplex conversation, mute/unmute, private feedback for each voice, reconnection, and leaving. Also run a solo AI conversation and verify spoken responses and transcript. A Gemini API key and a working backend are required. No live AI or two-device browser verification was performed during this revision.
 
-Repository-wide lint has existing errors in older modules; see the command output when running `npm run lint`. The changed call server and primary pages were checked separately.
+Run `npm run lint` for repository-wide static checks.

@@ -34,11 +34,6 @@ export type AIFeedback = {
     rows?: PronunciationFeedbackRow[];
 };
 
-export type AITip = {
-    tip: string;
-    createdAt: string;
-};
-
 export type PronunciationFeedbackRow = {
     word: string;
     userPronunciation: string;
@@ -59,10 +54,6 @@ export function copyToClipboard(value: string) {
     return navigator.clipboard.writeText(value);
 }
 
-export function getShareUrl(roomId: string) {
-    return `${window.location.origin}/rooms?room=${encodeURIComponent(roomId)}`;
-}
-
 export function pcmFloat32ToBase64(input: Float32Array) {
     const pcm16 = new Int16Array(input.length);
     for (let i = 0; i < input.length; i += 1) {
@@ -77,38 +68,4 @@ export function pcmFloat32ToBase64(input: Float32Array) {
     }
 
     return btoa(binary);
-}
-
-export function blobToBase64(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-            const result = reader.result;
-            if (typeof result !== 'string') {
-                reject(new Error('Unable to convert audio blob'));
-                return;
-            }
-
-            const base64 = result.split(',')[1];
-            if (!base64) {
-                reject(new Error('Invalid audio blob result'));
-                return;
-            }
-
-            resolve(base64);
-        };
-        reader.onerror = () => reject(reader.error ?? new Error('FileReader error'));
-        reader.readAsDataURL(blob);
-    });
-}
-
-export function base64ToBlob(base64: string, mimeType: string): Blob {
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-
-    for (let index = 0; index < binary.length; index += 1) {
-        bytes[index] = binary.charCodeAt(index);
-    }
-
-    return new Blob([bytes], { type: mimeType });
 }

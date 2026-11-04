@@ -32,7 +32,7 @@ const Login = () => {
                 login(email.trim(), name.trim() || 'User');
             }
             navigate('/practice');
-        } catch (err) {
+        } catch {
             setError('Something went wrong. Please try again.');
         }
     };

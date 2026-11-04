@@ -26,7 +26,6 @@ type AIFeedback = {
     transcript: string;
     correction: string;
     pronunciationTip: string;
-    interruptTip: string;
     rows: PronunciationFeedbackRow[];
 };
 
@@ -40,8 +39,6 @@ type Participant = {
 type ClientAudioPayload = {
     pcmData?: string;
     pcmMimeType?: string;
-    mediaData?: string;
-    mediaMimeType?: string;
 };
 
 type RoomState = {
@@ -74,7 +71,6 @@ Analyze the provided spoken English audio and return compact JSON using this exa
   "transcript": "",
   "correction": "",
   "pronunciationTip": "",
-  "interruptTip": "",
   "rows": [
     {
       "word": "",
@@ -90,7 +86,6 @@ Rules:
 - transcript: the speaker's final cleaned transcript
 - correction: corrected sentence, or empty string if not needed
 - pronunciationTip: one short overall pronunciation tip
-- interruptTip: always return an empty string
 - rows: include 1 to 5 pronunciation issues only when clearly audible, otherwise []
 - Never infer sound errors from the transcript alone. Do not treat a regional accent as an error. If uncertain, say so.
 - userPronunciation: approximate what the speaker said in simple syllables
@@ -436,7 +431,6 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 transcript: typeof parsed.transcript === 'string' ? parsed.transcript.trim() : '',
                 correction: typeof parsed.correction === 'string' ? parsed.correction.trim() : '',
                 pronunciationTip: typeof parsed.pronunciationTip === 'string' ? parsed.pronunciationTip.trim() : '',
-                interruptTip: '',
                 rows: sanitizeRows(parsed.rows),
             };
 
@@ -688,13 +682,6 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
 
             const role = participant.role;
             const partner = getPartner(room, role);
-            if (payload.mediaData && partner) {
-                io.to(partner.socketId).emit('partner-audio', {
-                    audio: payload.mediaData,
-                    mimeType: payload.mediaMimeType ?? 'audio/webm;codecs=opus',
-                });
-            }
-
             if (!payload.pcmData) {
                 return;
             }

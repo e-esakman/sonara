@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Icon } from '@iconify/react';
 import type { Socket } from 'socket.io-client';
 import { useStore } from '../store/useStore';
@@ -8,7 +8,6 @@ import {
     copyToClipboard,
     createConversationRoomSocket,
     type AIFeedback,
-    type AITip,
     type InviteRoomCreatedPayload,
     type PronunciationFeedbackRow,
     type RoomReadyPayload,
@@ -43,7 +42,6 @@ const Rooms = () => {
     const [coachQuestion, setCoachQuestion] = useState('');
     const [coachMessages, setCoachMessages] = useState<Array<{ id: string; role: 'user' | 'ai'; text: string; createdAt: string }>>([]);
     const [isAskingCoach, setIsAskingCoach] = useState(false);
-    const [liveTip, setLiveTip] = useState<AITip | null>(null);
     const [waveformSamples, setWaveformSamples] = useState<number[]>([]);
 
 
@@ -62,7 +60,6 @@ const Rooms = () => {
     const isMicActiveRef = useRef(false);
     const isRoomActiveRef = useRef(false);
     const inviteJoinAttemptedRef = useRef(false);
-    const liveTipTimeoutRef = useRef<number | null>(null);
     const transcriptPanelRef = useRef<HTMLDivElement | null>(null);
     const pendingTranscriptEntriesRef = useRef<TranscriptEntry[]>([]);
     const transcriptBatchTimeoutRef = useRef<number | null>(null);
@@ -183,6 +180,12 @@ const Rooms = () => {
     };
 
 
+    const onTranscriptEntry = useEffectEvent(queueTranscriptEntry);
+    const stopRoomSpeaking = useEffectEvent(stopSpeaking);
+    const speakCoachAnswer = useEffectEvent((answer: string) => {
+        speakText({ text: answer, accentStyle, rate: 0.95 });
+    });
+
     useEffect(() => {
         let socket: Socket;
         try {
@@ -272,7 +275,7 @@ const Rooms = () => {
             setCallStatus('Room unavailable');
         });
 
-        socket.on('transcript-entry', queueTranscriptEntry);
+        socket.on('transcript-entry', (entry: TranscriptEntry) => onTranscriptEntry(entry));
 
         socket.on('ai-feedback', (feedback: AIFeedback) => {
             setFeedbackItems((current) => [feedback, ...current].slice(0, 12));
@@ -291,7 +294,7 @@ const Rooms = () => {
                 return [...next, ...current].slice(0, 6);
             });
             if (answer && !isMicActiveRef.current) {
-                speakText({ text: answer, accentStyle, rate: 0.95 });
+                speakCoachAnswer(answer);
             }
             setIsAskingCoach(false);
         });
@@ -303,16 +306,6 @@ const Rooms = () => {
             status?: string;
         }) => {
             if (payload.type === 'gemini-status' && payload.status) setCoachStatus(payload.status);
-        });
-
-        socket.on('ai-tip', (tip: AITip) => {
-            setLiveTip(tip);
-            if (liveTipTimeoutRef.current) {
-                window.clearTimeout(liveTipTimeoutRef.current);
-            }
-            liveTipTimeoutRef.current = window.setTimeout(() => {
-                setLiveTip(null);
-            }, 3200);
         });
 
         socket.on('partner-audio', ({ audio }: { audio: string }) => {
@@ -346,18 +339,15 @@ const Rooms = () => {
             isRoomActiveRef.current = false;
             resetPartnerAudioQueue();
             stopTts();
-            void stopSpeaking(false);
+            void stopRoomSpeaking(false);
             void releaseMicrophone();
         });
 
         return () => {
-            if (liveTipTimeoutRef.current) {
-                window.clearTimeout(liveTipTimeoutRef.current);
-            }
             flushTranscriptBatch();
             resetPartnerAudioQueue();
             stopTts();
-            void stopSpeaking(false);
+            void stopRoomSpeaking(false);
             void releaseMicrophone();
             inviteJoinAttemptedRef.current = false;
             socket.disconnect();
@@ -550,7 +540,6 @@ const Rooms = () => {
 
         setTranscripts([]);
         setFeedbackItems([]);
-        setLiveTip(null);
         pendingTranscriptEntriesRef.current = [];
 
 
@@ -772,20 +761,6 @@ const Rooms = () => {
                                             </div>
                                         ))}
                                     </div>
-
-                                    {liveTip && (
-                                        <div className="mt-6 rounded-[22px] border border-amber-200/30 bg-amber-50/90 px-4 py-3 text-sm text-amber-900 shadow-sm">
-                                            <div className="flex items-start gap-3">
-                                                <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-amber-100 text-amber-700">
-                                                    <Icon icon="solar:bolt-circle-bold" width="18" />
-                                                </div>
-                                                <div>
-                                                    <p className="font-semibold">Live coaching tip</p>
-                                                    <p className="mt-1 text-amber-900/80">{liveTip.tip}</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    )}
 
                                     {errorMessage && (
                                         <div className="mt-6 rounded-[22px] border border-rose-200/40 bg-rose-50/90 px-4 py-3 text-sm text-rose-900 shadow-sm">

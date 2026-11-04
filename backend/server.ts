@@ -4,8 +4,6 @@ import express from 'express';
 import cors from 'cors';
 
 import analyzeRoute from './routes/analyze.ts';
-import progressRoute from './routes/progress.ts';
-import grammarRoute from './routes/grammar.ts';
 import { setupLiveProxy } from './liveProxy.ts';
 import { setupConversationRoomServer } from './rooms/liveConversationServer.ts';
 
@@ -38,8 +36,6 @@ app.get("/", (_req, res) => {
 
 // API routes
 app.use('/analyze', analyzeRoute);
-app.use('/grammar', grammarRoute);
-app.use('/', progressRoute);
 
 // Create HTTP server so the WebSocket proxy can share the same port
 const server = http.createServer(app);
