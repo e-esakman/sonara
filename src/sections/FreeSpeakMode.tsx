@@ -389,8 +389,14 @@ const FreeSpeakMode = ({ initialMode = 'standard', hideToggle = false, titleMode
         if (liveRecording) {
             stopLiveRecording();
         } else {
-            if (liveStatus === 'Disconnected') await geminiLiveService.startSession();
-            startLiveRecording();
+            try {
+                await geminiLiveService.startSession();
+                await startLiveRecording();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Could not start the coach';
+                geminiLiveService.onError(new Error(message));
+                setLiveStatus('Disconnected');
+            }
         }
     }, [liveRecording, liveStatus, startLiveRecording, stopLiveRecording]);
 

@@ -11,17 +11,10 @@ const Navigation = () => {
 
     const navLinks = [
         { to: '/', label: 'Home' },
-        { to: '/practice', label: 'Practice' },
-        { to: '/rooms', label: 'Rooms' },
-        { to: '/grammar', label: 'Grammar' },
-        { to: '/library', label: 'Library' },
+        { to: '/practice', label: 'AI coach' },
+        { to: '/rooms', label: 'Practice together' },
     ];
-
-    const userLinks = [
-        { to: '/dashboard', label: 'Dashboard' },
-        { to: '/progress', label: 'Progress' },
-        { to: '/sessions', label: 'Sessions' },
-    ];
+    const userLinks = [{ to: '/practice', label: 'My practice' }];
 
     const handleLogout = () => {
         logout();

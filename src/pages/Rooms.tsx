@@ -5,8 +5,6 @@ import { useStore } from '../store/useStore';
 import RoomWaveform from '../components/RoomWaveform';
 import { speakText, stopSpeaking as stopTts } from '../utils/tts';
 import {
-    base64ToBlob,
-    blobToBase64,
     copyToClipboard,
     createConversationRoomSocket,
     type AIFeedback,
@@ -25,15 +23,6 @@ const MAX_TRANSCRIPT_ENTRIES = 100;
 const TRANSCRIPT_BATCH_MS = 120;
 const FEEDBACK_VOICE_INTERVAL_MS = 5000;
 const WAVEFORM_UPDATE_MS = 120;
-
-function getRelayMimeType() {
-    if (typeof MediaRecorder === 'undefined') {
-        return '';
-    }
-
-    const candidates = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
-    return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType)) ?? '';
-}
 
 const Rooms = () => {
     const { user, accentStyle } = useStore();
@@ -56,14 +45,16 @@ const Rooms = () => {
     const [isAskingCoach, setIsAskingCoach] = useState(false);
     const [liveTip, setLiveTip] = useState<AITip | null>(null);
     const [waveformSamples, setWaveformSamples] = useState<number[]>([]);
-    const [lastAudioSentAt, setLastAudioSentAt] = useState<string | null>(null);
-    const [lastGeminiAudioAt, setLastGeminiAudioAt] = useState<string | null>(null);
-    const [lastTranscriptAt, setLastTranscriptAt] = useState<string | null>(null);
-    const [lastTranscriptText, setLastTranscriptText] = useState('');
+
+
+
+
 
     const socketRef = useRef<Socket | null>(null);
     const mediaStreamRef = useRef<MediaStream | null>(null);
-    const relayRecorderRef = useRef<MediaRecorder | null>(null);
+    const playbackContextRef = useRef<AudioContext | null>(null);
+    const playbackTimeRef = useRef(0);
+    const speechTurnRef = useRef({ speaking: false, silence: 0, duration: 0 });
     const micContextRef = useRef<AudioContext | null>(null);
     const pcmProcessorRef = useRef<ScriptProcessorNode | null>(null);
     const micSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
@@ -72,8 +63,6 @@ const Rooms = () => {
     const isRoomActiveRef = useRef(false);
     const inviteJoinAttemptedRef = useRef(false);
     const liveTipTimeoutRef = useRef<number | null>(null);
-    const partnerAudioQueueRef = useRef<Array<{ audio: string; mimeType: string }>>([]);
-    const isPlayingPartnerAudioRef = useRef(false);
     const transcriptPanelRef = useRef<HTMLDivElement | null>(null);
     const pendingTranscriptEntriesRef = useRef<TranscriptEntry[]>([]);
     const transcriptBatchTimeoutRef = useRef<number | null>(null);
@@ -82,6 +71,7 @@ const Rooms = () => {
     const pendingVoiceFeedbackRef = useRef<AIFeedback | null>(null);
     const lastVoiceFeedbackAtRef = useRef<number>(0);
     const voiceFeedbackIntervalRef = useRef<number | null>(null);
+    const reconnectTokenRef = useRef('');
     const roomSessionRef = useRef<{ roomId: string | null; role: 'userA' | 'userB'; name: string }>({
         roomId: null,
         role: 'userA',
@@ -105,8 +95,10 @@ const Rooms = () => {
     }, [roomId, selfLabel, user?.name, userRole]);
 
     const resetPartnerAudioQueue = () => {
-        partnerAudioQueueRef.current = [];
-        isPlayingPartnerAudioRef.current = false;
+        playbackTimeRef.current = 0;
+        const context = playbackContextRef.current;
+        playbackContextRef.current = null;
+        void context?.close().catch(() => undefined);
     };
 
     const flushTranscriptBatch = () => {
@@ -167,17 +159,43 @@ const Rooms = () => {
         }
     };
 
+    const stopSpeaking = async (notifyServer = true) => {
+        if (notifyServer) {
+            socketRef.current?.emit('audio-stream-end');
+        }
+
+        if (pcmProcessorRef.current) {
+            pcmProcessorRef.current.disconnect();
+            pcmProcessorRef.current.onaudioprocess = null;
+            pcmProcessorRef.current = null;
+        }
+
+        if (micSourceRef.current) {
+            micSourceRef.current.disconnect();
+            micSourceRef.current = null;
+        }
+
+        isMicActiveRef.current = false;
+        speechTurnRef.current = { speaking: false, silence: 0, duration: 0 };
+        await releaseMicrophone();
+        setIsMicActive(false);
+        setWaveformSamples([]);
+    };
+
+
     useEffect(() => {
         let socket: Socket;
         try {
             socket = createConversationRoomSocket();
         } catch (error) {
             const message = error instanceof Error ? error.message : getBackendUrlConfigError();
-            setErrorMessage(message);
-            setCallStatus('Configuration error');
-            setCoachStatus('AI coach unavailable');
-            setIsSocketConnected(false);
-            return;
+            const timer = window.setTimeout(() => {
+                setErrorMessage(message);
+                setCallStatus('Configuration error');
+                setCoachStatus('AI coach unavailable');
+                setIsSocketConnected(false);
+            }, 0);
+            return () => window.clearTimeout(timer);
         }
 
         socketRef.current = socket;
@@ -188,7 +206,7 @@ const Rooms = () => {
             const savedSession = roomSessionRef.current;
             if (savedSession.roomId) {
                 setCallStatus('Rejoining room...');
-                socket.emit('rejoin-room', savedSession);
+                socket.emit('rejoin-room', { ...savedSession, reconnectToken: reconnectTokenRef.current });
                 return;
             }
 
@@ -216,10 +234,11 @@ const Rooms = () => {
         });
 
         socket.on('invite-room-created', (payload: InviteRoomCreatedPayload) => {
+            reconnectTokenRef.current = payload.reconnectToken;
             setRoomId(payload.roomId);
             setUserRole(payload.role);
             setSelfLabel(payload.selfLabel);
-            setInviteUrl(payload.shareUrl);
+            setInviteUrl(`${window.location.origin}/rooms?room=${encodeURIComponent(payload.roomId)}`);
             setCallState('waiting-link');
             setCallStatus('Invite link ready. Waiting for your friend...');
             setPartnerLabel('Waiting for your friend');
@@ -236,18 +255,20 @@ const Rooms = () => {
         });
 
         socket.on('room-ready', (payload: RoomReadyPayload) => {
+            reconnectTokenRef.current = payload.reconnectToken;
             setRoomId(payload.roomId);
             setUserRole(payload.role);
             setSelfLabel(payload.selfLabel);
             setPartnerLabel(payload.partnerLabel);
             setCallState('connected');
-            setCallStatus('Room connected. Tap the mic to start speaking.');
+            setCallStatus('Room connected. Tap Join audio to hear your friend and start speaking.');
             isRoomActiveRef.current = true;
             setErrorMessage(null);
         });
 
         socket.on('room-error', ({ message }: { message: string }) => {
             setErrorMessage(message);
+            setCallState('idle');
             setCallStatus('Room unavailable');
         });
 
@@ -269,7 +290,7 @@ const Rooms = () => {
                 }
                 return [...next, ...current].slice(0, 6);
             });
-            if (answer) {
+            if (answer && !isMicActiveRef.current) {
                 speakText({ text: answer, accentStyle, rate: 0.95 });
             }
             setIsAskingCoach(false);
@@ -281,16 +302,7 @@ const Rooms = () => {
             transcript?: string;
             status?: string;
         }) => {
-            if (payload.type === 'audio-sent') {
-                setLastAudioSentAt(payload.createdAt);
-            } else if (payload.type === 'gemini-audio-received') {
-                setLastGeminiAudioAt(payload.createdAt);
-            } else if (payload.type === 'gemini-transcript') {
-                setLastTranscriptAt(payload.createdAt);
-                setLastTranscriptText(payload.transcript || '');
-            } else if (payload.type === 'gemini-status' && payload.status) {
-                setCoachStatus(payload.status);
-            }
+            if (payload.type === 'gemini-status' && payload.status) setCoachStatus(payload.status);
         });
 
         socket.on('ai-tip', (tip: AITip) => {
@@ -303,14 +315,31 @@ const Rooms = () => {
             }, 3200);
         });
 
-        socket.on('partner-audio', ({ audio, mimeType }: { audio: string; mimeType: string }) => {
-            partnerAudioQueueRef.current.push({ audio, mimeType });
-            void playNextPartnerChunk();
+        socket.on('partner-audio', ({ audio }: { audio: string }) => {
+            const context = playbackContextRef.current;
+            if (!context || context.state !== 'running') return;
+            const binary = atob(audio);
+            const bytes = Uint8Array.from(binary, char => char.charCodeAt(0));
+            const pcm = new DataView(bytes.buffer);
+            const buffer = context.createBuffer(1, bytes.length / 2, 16000);
+            const samples = buffer.getChannelData(0);
+            for (let i = 0; i < samples.length; i++) samples[i] = pcm.getInt16(i * 2, true) / 32768;
+            const source = context.createBufferSource();
+            source.buffer = buffer;
+            source.connect(context.destination);
+            // Bound latency after a slow connection or a backgrounded tab.
+            const now = context.currentTime;
+            if (playbackTimeRef.current > now + 0.8) return;
+            const start = Math.max(now + 0.04, playbackTimeRef.current);
+            source.start(start);
+            playbackTimeRef.current = start + buffer.duration;
         });
 
         socket.on('room-ended', ({ message }: { message: string }) => {
             setCallState('ended');
             setCallStatus(message);
+            reconnectTokenRef.current = '';
+            roomSessionRef.current.roomId = null;
             setRoomId(null);
             setInviteUrl('');
             setPartnerLabel('Waiting for your friend');
@@ -330,6 +359,7 @@ const Rooms = () => {
             stopTts();
             void stopSpeaking(false);
             void releaseMicrophone();
+            inviteJoinAttemptedRef.current = false;
             socket.disconnect();
         };
     }, [user?.name]);
@@ -373,7 +403,7 @@ const Rooms = () => {
         }
 
         voiceFeedbackIntervalRef.current = window.setInterval(() => {
-            if (!isRoomActiveRef.current || !isMicActiveRef.current) {
+            if (!isRoomActiveRef.current || isMicActiveRef.current) {
                 return;
             }
 
@@ -405,37 +435,6 @@ const Rooms = () => {
         };
     }, [accentStyle, callState]);
 
-    const playNextPartnerChunk = async () => {
-        if (isPlayingPartnerAudioRef.current) {
-            return;
-        }
-
-        const nextChunk = partnerAudioQueueRef.current.shift();
-        if (!nextChunk) {
-            return;
-        }
-
-        isPlayingPartnerAudioRef.current = true;
-        const blob = base64ToBlob(nextChunk.audio, nextChunk.mimeType);
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-
-        const finishPlayback = () => {
-            URL.revokeObjectURL(url);
-            isPlayingPartnerAudioRef.current = false;
-            void playNextPartnerChunk();
-        };
-
-        audio.onended = finishPlayback;
-        audio.onerror = finishPlayback;
-
-        try {
-            await audio.play();
-        } catch {
-            finishPlayback();
-        }
-    };
-
     const ensureMicrophone = async () => {
         if (mediaStreamRef.current) {
             return mediaStreamRef.current;
@@ -465,31 +464,6 @@ const Rooms = () => {
         }
     };
 
-    const stopSpeaking = async (notifyServer = true) => {
-        if (notifyServer) {
-            socketRef.current?.emit('audio-stream-end');
-        }
-
-        if (relayRecorderRef.current && relayRecorderRef.current.state !== 'inactive') {
-            relayRecorderRef.current.stop();
-        }
-        relayRecorderRef.current = null;
-
-        if (pcmProcessorRef.current) {
-            pcmProcessorRef.current.disconnect();
-            pcmProcessorRef.current.onaudioprocess = null;
-            pcmProcessorRef.current = null;
-        }
-
-        if (micSourceRef.current) {
-            micSourceRef.current.disconnect();
-            micSourceRef.current = null;
-        }
-
-        setIsMicActive(false);
-        setWaveformSamples([]);
-    };
-
     const startSpeaking = async () => {
         if (!roomId || !socketRef.current) {
             setErrorMessage('Join a room before starting the microphone.');
@@ -500,6 +474,8 @@ const Rooms = () => {
             return;
         }
 
+        if (!playbackContextRef.current) playbackContextRef.current = new AudioContext();
+        await playbackContextRef.current.resume();
         const stream = await ensureMicrophone();
         const socket = socketRef.current;
 
@@ -526,7 +502,7 @@ const Rooms = () => {
             const outputData = event.outputBuffer.getChannelData(0);
             outputData.fill(0);
 
-            if (isMutedRef.current || !isRoomActiveRef.current) {
+            if (isMutedRef.current || !isRoomActiveRef.current || !socket.connected) {
                 return;
             }
 
@@ -544,37 +520,18 @@ const Rooms = () => {
                 pcmData,
                 pcmMimeType: 'audio/pcm;rate=16000',
             });
-        };
-
-        const preferredMimeType = getRelayMimeType();
-        let relayRecorder: MediaRecorder;
-        try {
-            relayRecorder = preferredMimeType ? new MediaRecorder(stream, { mimeType: preferredMimeType }) : new MediaRecorder(stream);
-        } catch {
-            relayRecorder = new MediaRecorder(stream);
-        }
-        relayRecorder.ondataavailable = async (event) => {
-            if (!event.data.size || isMutedRef.current || !isRoomActiveRef.current) {
-                return;
-            }
-
-            try {
-                const mediaData = await blobToBase64(event.data);
-                socket.emit('audio-stream', {
-                    mediaData,
-                    mediaMimeType: event.data.type || preferredMimeType || 'audio/webm',
-                });
-            } catch {
-                setErrorMessage('Could not process a microphone chunk for room audio.');
+            const turn = speechTurnRef.current;
+            const elapsed = inputData.length / micContext.sampleRate;
+            turn.duration += elapsed;
+            if (rms > 0.015) { turn.speaking = true; turn.silence = 0; }
+            else turn.silence += elapsed;
+            if ((turn.speaking && turn.silence >= 0.8) || turn.duration >= 12) {
+                socket.emit('audio-stream-end');
+                speechTurnRef.current = { speaking: false, silence: 0, duration: 0 };
             }
         };
 
-        relayRecorder.onstop = () => {
-            setIsMicActive(false);
-        };
-
-        relayRecorder.start(300);
-        relayRecorderRef.current = relayRecorder;
+        isMicActiveRef.current = true;
         setIsMicActive(true);
         setCallStatus('Microphone live');
     };
@@ -595,10 +552,10 @@ const Rooms = () => {
         setFeedbackItems([]);
         setLiveTip(null);
         pendingTranscriptEntriesRef.current = [];
-        setLastAudioSentAt(null);
-        setLastGeminiAudioAt(null);
-        setLastTranscriptAt(null);
-        setLastTranscriptText('');
+
+
+
+
         setErrorMessage(null);
         socketRef.current.emit('create-invite-room', { name: user?.name || 'Host' });
     };
@@ -663,6 +620,7 @@ const Rooms = () => {
         resetPartnerAudioQueue();
         stopTts();
         socketRef.current?.emit('leave-room');
+        roomSessionRef.current.roomId = null;
         setRoomId(null);
         setInviteUrl('');
         setPartnerLabel('Waiting for your friend');
@@ -690,8 +648,6 @@ const Rooms = () => {
     const primaryFeedback = feedbackItems[0];
     const inviteParam = new URLSearchParams(window.location.search).get('room');
     const showInviteButton = !inviteParam && !inviteUrl && !roomId;
-    const formatStamp = (value: string | null) =>
-        value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Waiting';
     const formatTranscriptStamp = (value: string) =>
         new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const feedbackRows: PronunciationFeedbackRow[] = primaryFeedback?.rows ?? [];
@@ -704,7 +660,7 @@ const Rooms = () => {
                         <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
                             <div>
                                 <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-400">Rooms</p>
-                                <h1 className="mt-2 text-[34px] font-dm-sans font-semibold tracking-tight text-[#111]">Live Conversation Room</h1>
+                                <h1 className="mt-2 text-[34px] font-dm-sans font-semibold tracking-tight text-[#111]">A little practice. Together.</h1>
                                 <p className="mt-2 max-w-2xl text-sm leading-relaxed text-neutral-500">
                                     Create a private room, share the invite, and speak live while Gemini listens for pronunciation and grammar coaching.
                                 </p>
@@ -781,45 +737,7 @@ const Rooms = () => {
                                         <RoomWaveform samples={waveformSamples} active={isMicActive && !isMuted} />
                                     </div>
 
-                                    <div className="mt-4 grid gap-3 md:grid-cols-3">
-                                        {[
-                                            {
-                                                label: 'Audio sent',
-                                                value: formatStamp(lastAudioSentAt),
-                                                active: !!lastAudioSentAt,
-                                                icon: 'solar:microphone-3-bold',
-                                            },
-                                            {
-                                                label: 'Gemini received audio',
-                                                value: formatStamp(lastGeminiAudioAt),
-                                                active: !!lastGeminiAudioAt,
-                                                icon: 'solar:soundwave-bold',
-                                            },
-                                            {
-                                                label: 'Gemini returned transcript',
-                                                value: lastTranscriptAt ? `${formatStamp(lastTranscriptAt)}` : 'Waiting',
-                                                active: !!lastTranscriptAt,
-                                                icon: 'solar:chat-round-dots-bold',
-                                            },
-                                        ].map((item) => (
-                                            <div key={item.label} className={`rounded-[22px] border px-4 py-4 ${
-                                                item.active ? 'border-emerald-200/40 bg-emerald-50/12' : 'border-white/10 bg-white/8'
-                                            }`}>
-                                                <div className="flex items-center gap-2 text-white/80">
-                                                    <Icon icon={item.icon} width="16" />
-                                                    <p className="text-xs uppercase tracking-[0.16em]">{item.label}</p>
-                                                </div>
-                                                <p className="mt-3 text-sm font-medium text-white">{item.value}</p>
-                                            </div>
-                                        ))}
-                                    </div>
-
-                                    {lastTranscriptText && (
-                                        <div className="mt-4 rounded-[22px] border border-sky-200/20 bg-sky-50/10 px-4 py-3 text-sm text-white/90">
-                                            <p className="text-xs uppercase tracking-[0.16em] text-white/60">Latest Gemini transcript</p>
-                                            <p className="mt-2">{lastTranscriptText}</p>
-                                        </div>
-                                    )}
+                                    <p className="mt-5 text-sm text-white/70">Use headphones. Both friends should tap the microphone to join audio. Coaching appears privately during pauses.</p>
 
                                     <div className="mt-8 grid gap-6 md:grid-cols-2">
                                         {[
@@ -885,6 +803,8 @@ const Rooms = () => {
 
                                     <div className="mt-8 flex flex-wrap items-center gap-3">
                                         <button
+                                            aria-label={isMicActive ? 'Pause microphone' : 'Join audio'}
+                                            disabled={callState !== 'connected' || !isSocketConnected}
                                             onClick={() => void toggleMicrophone()}
                                             className={`flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition-all ${
                                                 isMicActive ? 'bg-rose-500 text-white hover:bg-rose-600' : 'bg-white text-[#111] hover:bg-neutral-100'
@@ -896,12 +816,12 @@ const Rooms = () => {
                                         <div className="rounded-full border border-white/15 bg-white/10 px-4 py-3 text-sm text-white/80">
                                             {callState === 'idle' && 'Pick a room option first'}
                                             {callState === 'waiting-link' && 'Share your invite link and wait for them to join'}
-                                            {callState === 'connected' && (isMicActive ? 'Mic live' : 'Room ready for speech')}
+                                            {callState === 'connected' && (isMicActive ? 'Mic live' : 'Tap Join audio on both devices')}
                                             {callState === 'ended' && 'Start again when you are ready'}
                                         </div>
 
                                         <button
-                                            onClick={() => setIsMuted((current) => !current)}
+                                            onClick={() => setIsMuted((current) => { isMutedRef.current = !current; if (!current) socketRef.current?.emit('audio-stream-end'); return !current; })}
                                             disabled={!roomId}
                                             className={`flex items-center gap-2 rounded-full border px-5 py-3 text-sm font-medium transition-all ${
                                                 isMuted
@@ -929,7 +849,7 @@ const Rooms = () => {
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">Transcript</p>
-                                        <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Unified Transcript</h2>
+                                        <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Conversation</h2>
                                     </div>
                                     <div className="rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-500">
                                         {transcripts.length} entries
@@ -956,9 +876,9 @@ const Rooms = () => {
                         <aside className="space-y-6">
                             <div className="rounded-[28px] border border-[#e6e0d8] bg-[linear-gradient(180deg,rgba(255,255,255,0.92)_0%,rgba(245,248,247,0.98)_100%)] p-6 shadow-[0_12px_32px_rgba(0,0,0,0.05)]">
                                 <p className="text-xs font-bold uppercase tracking-[0.18em] text-neutral-400">AI Coach</p>
-                                <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Speaker Feedback</h2>
+                                <h2 className="mt-2 text-2xl font-dm-sans font-semibold tracking-tight text-[#111]">Your pronunciation coach</h2>
                                 <p className="mt-2 text-sm leading-relaxed text-neutral-500">
-                                    Gemini analyzes your final speech turn and returns your transcript plus pronunciation coaching here.
+                                    Your coach listens to your voice and offers private feedback when you pause. Use headphones for the clearest call.
                                 </p>
 
                                 <div className="mt-6 space-y-4">
@@ -1015,7 +935,7 @@ const Rooms = () => {
                                                 <Icon icon="solar:stars-line-duotone" width="24" />
                                             </div>
                                             <p className="mt-4 text-sm leading-relaxed text-neutral-500">
-                                                Once the room is connected, tap the mic and finish speaking. Gemini will return final transcript and pronunciation feedback here.
+                                                Tap Join audio on both devices. Talk naturally; your feedback appears here when you pause.
                                             </p>
                                         </div>
                                     )}

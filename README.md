@@ -1,3 +1,5 @@
+> Pronunciation-focused revision: see [setup, changes, and verification](PRONUNCIATION_FOCUS.md).
+
 # Sonara – AI Pronunciation Coach
 Built for Gemini Live Agent Challenge (Live Agents Category)
 

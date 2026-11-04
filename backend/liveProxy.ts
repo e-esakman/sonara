@@ -13,7 +13,7 @@ When users speak English sentences:
 
 Keep responses short and conversational.`;
 
-const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL;
+const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
 
 export function setupLiveProxy(server: Server) {
     const wss = new WebSocketServer({ noServer: true });
@@ -43,9 +43,7 @@ export function setupLiveProxy(server: Server) {
                 callbacks: {
                     onopen: () => {
                         console.log('[LiveProxy] Gemini session opened');
-                        if (clientWs.readyState === WebSocket.OPEN) {
-                            clientWs.send(JSON.stringify({ type: 'status', status: 'Connected to Live AI Coach' }));
-                        }
+
                     },
                     onmessage: (message: object) => {
                         if (clientWs.readyState === WebSocket.OPEN) {
@@ -67,6 +65,7 @@ export function setupLiveProxy(server: Server) {
                 },
                 config: {
                     responseModalities: [Modality.AUDIO],
+                    outputAudioTranscription: {},
                     systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] }
                 }
             });
@@ -75,6 +74,12 @@ export function setupLiveProxy(server: Server) {
             clientWs.close(1011, 'Failed to connect to Gemini Live');
             return;
         }
+
+        if (clientWs.readyState !== WebSocket.OPEN) {
+            geminiSession.close();
+            return;
+        }
+        clientWs.send(JSON.stringify({ type: 'status', status: 'Connected to Live AI Coach' }));
 
         clientWs.on('message', (data: WebSocket.RawData) => {
             if (!geminiSession) return;
@@ -97,7 +102,7 @@ export function setupLiveProxy(server: Server) {
                          console.error('[LiveProxy] Gemini sendRealtimeInput error:', sendErr);
                     }
                 } else if (msg.type === 'audioEnd') {
-                    // (Optional) geminiSession.sendRealtimeInput([{ ... }]) handles stream ends. We can ignore explicit audioEnd or pass empty array
+                    geminiSession.sendRealtimeInput({ audioStreamEnd: true });
                 } else if (msg.type === 'clientContent' && msg.turnComplete) {
                     // Removed turnComplete signal as it triggers "Request contains an invalid argument" in Gemini 2.5 Native Audio
                 }

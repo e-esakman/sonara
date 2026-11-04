@@ -5,6 +5,7 @@ export type RoomReadyPayload = {
     roomId: string;
     role: 'userA' | 'userB';
     selfLabel: string;
+    reconnectToken: string;
     partnerLabel: string;
 };
 
@@ -13,6 +14,7 @@ export type InviteRoomCreatedPayload = {
     shareUrl: string;
     role: 'userA';
     selfLabel: string;
+    reconnectToken: string;
 };
 
 export type TranscriptEntry = {

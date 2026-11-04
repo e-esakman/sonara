@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import type { Server as HttpServer } from 'http';
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 
 type SpeakerRole = 'userA' | 'userB';
@@ -34,6 +34,7 @@ type Participant = {
     socketId: string;
     label: string;
     role: SpeakerRole;
+    reconnectToken: string;
 };
 
 type ClientAudioPayload = {
@@ -43,19 +44,10 @@ type ClientAudioPayload = {
     mediaMimeType?: string;
 };
 
-type LiveSession = {
-    sendRealtimeInput: (input: { audio: { data: string; mimeType: string } }) => void;
-    close: () => void;
-};
-
 type RoomState = {
     roomId: string;
     userA: Participant;
     userB: Participant | null;
-    geminiSessionA: SpeakerSession | null;
-    geminiSessionB: SpeakerSession | null;
-    geminiSessionPromiseA: Promise<SpeakerSession | null> | null;
-    geminiSessionPromiseB: Promise<SpeakerSession | null> | null;
     geminiKeyA: string | null;
     geminiKeyB: string | null;
     lastFeedbackA: AIFeedback | null;
@@ -73,25 +65,7 @@ type RoomState = {
 
 const INVITE_TTL_MS = 10 * 60 * 1000;
 const RECONNECT_GRACE_MS = 15 * 1000;
-// Use a separate model for rooms (needs TEXT modality for JSON feedback)
-// Falls back to gemini-2.0-flash-live-001 if GEMINI_ROOM_MODEL is not set
-const LIVE_MODEL = process.env.GEMINI_ROOM_MODEL || process.env.GEMINI_LIVE_MODEL || 'gemini-2.0-flash-live-001';
-const ANALYSIS_MODEL = process.env.GEMINI_ANALYSIS_MODEL;
-
-const COACH_INSTRUCTION = `You are Sonara's live conversation coach for one speaker in a two-person room.
-
-Listen to the speaker's audio and respond only with compact JSON using this exact shape:
-{"transcript":"","correction":"","pronunciationTip":"","interruptTip":"","rows":[]}
-
-Rules:
-- transcript: the speaker's spoken English, cleaned up and readable
-- correction: grammar correction, or empty string if the grammar is already good
-- pronunciationTip: one short pronunciation coaching tip, or empty string
-- interruptTip: a very short immediate coaching cue only when there is a mistake worth interrupting for, otherwise empty string
-- rows: always return []
-- Never include markdown
-- Never include extra keys
-- Keep every field concise`;
+const ANALYSIS_MODEL = process.env.GEMINI_ANALYSIS_MODEL || 'gemini-3.6-flash';
 
 const TURN_ANALYSIS_PROMPT = `You are Sonara's post-speech pronunciation coach.
 
@@ -117,7 +91,8 @@ Rules:
 - correction: corrected sentence, or empty string if not needed
 - pronunciationTip: one short overall pronunciation tip
 - interruptTip: always return an empty string
-- rows: include 1 to 5 pronunciation issues only, otherwise []
+- rows: include 1 to 5 pronunciation issues only when clearly audible, otherwise []
+- Never infer sound errors from the transcript alone. Do not treat a regional accent as an error. If uncertain, say so.
 - userPronunciation: approximate what the speaker said in simple syllables
 - correctPronunciation: the corrected pronunciation in simple syllables
 - phonetic: use IPA if possible
@@ -125,185 +100,6 @@ Rules:
 - Return valid JSON only`;
 
 const COACH_QA_PROMPT = `You are Sonara's conversation coach inside a two-person room.\n\nAnswer the user's question using the latest pronunciation feedback context if provided.\nRules:\n- Keep it to 1-2 short sentences\n- If there is no recent feedback, ask the user to speak a full sentence first\n- No markdown or extra formatting`;
-
-class SpeakerSession {
-    private session: LiveSession | null = null;
-    private buffer = '';
-    private readonly ai: GoogleGenAI;
-    private readonly onFeedback: (feedback: AIFeedback) => void;
-    private readonly onTranscript: (transcript: string) => void;
-    private readonly onStatus: (status: string) => void;
-    private readonly onClose?: () => void;
-    private closed = false;
-
-    constructor(
-        ai: GoogleGenAI,
-        onFeedback: (feedback: AIFeedback) => void,
-        onTranscript: (transcript: string) => void,
-        onStatus: (status: string) => void,
-        onClose?: () => void,
-    ) {
-        this.ai = ai;
-        this.onFeedback = onFeedback;
-        this.onTranscript = onTranscript;
-        this.onStatus = onStatus;
-        this.onClose = onClose;
-    }
-
-    async connect() {
-        if (this.session || !LIVE_MODEL) {
-            if (!LIVE_MODEL) {
-                this.onStatus('Gemini live model missing');
-            }
-            return;
-        }
-
-        try {
-            this.session = await this.ai.live.connect({
-                model: LIVE_MODEL,
-                callbacks: {
-                    onopen: () => this.onStatus('Coach connected'),
-                    onmessage: (message: object) => {
-                        this.handleMessage(message as {
-                            serverContent?: {
-                                inputTranscription?: { text?: string };
-                                turnComplete?: boolean;
-                                modelTurn?: { parts?: Array<{ text?: string }> };
-                            };
-                        });
-                    },
-                    onerror: () => this.onStatus('Coach unavailable'),
-                    onclose: () => {
-                        this.session = null;
-                        this.onStatus('Coach standing by');
-                    },
-                },
-                config: {
-                    responseModalities: [Modality.TEXT],
-                    inputAudioTranscription: {},
-                    systemInstruction: {
-                        parts: [{ text: COACH_INSTRUCTION }],
-                    },
-                },
-            }) as unknown as LiveSession;
-        } catch (error) {
-            console.error('[ConversationRoom] Failed to connect Gemini session', error);
-            this.onStatus('Coach unavailable');
-        }
-    }
-
-    sendAudio(audio: string, mimeType: string) {
-        if (!this.session) {
-            return false;
-        }
-
-        try {
-            this.session.sendRealtimeInput({
-                audio: {
-                    data: audio,
-                    mimeType,
-                },
-            });
-            return true;
-        } catch (error) {
-            console.error('[ConversationRoom] Failed to forward audio to Gemini', error);
-            return false;
-        }
-    }
-
-    endAudioTurn() {
-        if (!this.session) {
-            return;
-        }
-
-        try {
-            this.session.sendRealtimeInput({ audioStreamEnd: true } as unknown as { audio: { data: string; mimeType: string } });
-        } catch (error) {
-            console.error('[ConversationRoom] Failed to end Gemini audio stream', error);
-        }
-    }
-
-    close() {
-        this.buffer = '';
-        if (this.closed) {
-            return;
-        }
-
-        this.closed = true;
-        if (!this.session) {
-            this.onClose?.();
-            return;
-        }
-
-        try {
-            this.session.close();
-        } catch {
-            // intentionally ignored
-        }
-
-        this.session = null;
-        this.onClose?.();
-    }
-
-    private handleMessage(message: {
-        serverContent?: {
-            inputTranscription?: { text?: string };
-            turnComplete?: boolean;
-            modelTurn?: { parts?: Array<{ text?: string }>};
-        };
-    }) {
-        // Live transcription of what the speaker said — emit immediately to transcript panel
-        const inputTranscript = message.serverContent?.inputTranscription?.text?.trim();
-        if (inputTranscript) {
-            this.onTranscript(inputTranscript);
-        }
-
-        // Text parts from the model turn — parse as JSON coaching feedback
-        for (const part of message.serverContent?.modelTurn?.parts ?? []) {
-            if (!part.text) {
-                continue;
-            }
-
-            this.buffer += part.text;
-            const feedback = this.tryParseFeedback(this.buffer) ?? this.tryParseFeedback(part.text);
-            if (feedback) {
-                this.onFeedback(feedback);
-                this.buffer = '';
-            }
-        }
-
-        if (message.serverContent?.turnComplete) {
-            if (this.buffer) {
-                const feedback = this.tryParseFeedback(this.buffer);
-                if (feedback) {
-                    this.onFeedback(feedback);
-                }
-            }
-            this.buffer = '';
-        }
-    }
-
-    private tryParseFeedback(text: string): AIFeedback | null {
-        const start = text.indexOf('{');
-        const end = text.lastIndexOf('}');
-        if (start === -1 || end === -1 || end <= start) {
-            return null;
-        }
-
-        try {
-            const parsed = JSON.parse(text.slice(start, end + 1)) as Partial<AIFeedback>;
-            return {
-                transcript: typeof parsed.transcript === 'string' ? parsed.transcript.trim() : '',
-                correction: typeof parsed.correction === 'string' ? parsed.correction.trim() : '',
-                pronunciationTip: typeof parsed.pronunciationTip === 'string' ? parsed.pronunciationTip.trim() : '',
-                interruptTip: typeof parsed.interruptTip === 'string' ? parsed.interruptTip.trim() : '',
-                rows: [],
-            };
-        } catch {
-            return null;
-        }
-    }
-}
 
 export function setupConversationRoomServer(server: HttpServer, allowedOrigins: string[]) {
     const io = new SocketIOServer(server, {
@@ -375,6 +171,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
         socketId: socket.id,
         label: name?.trim() || socket.data.displayName || (role === 'userA' ? 'User A' : 'User B'),
         role,
+        reconnectToken: randomUUID(),
     });
 
     const emitRoomError = (socket: Socket, message: string) => {
@@ -497,8 +294,9 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
         clearInviteExpiry(room);
         clearDisconnectTimer(room, 'userA');
         clearDisconnectTimer(room, 'userB');
-        room.geminiSessionA?.close();
-        room.geminiSessionB?.close();
+        releaseKey(room.geminiKeyA);
+        releaseKey(room.geminiKeyB);
+        io.in(roomId).socketsLeave(roomId);
 
         rooms.delete(roomId);
         roomBySocket.delete(room.userA.socketId);
@@ -514,91 +312,8 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
         }
     };
 
-    const createSpeakerSession = async (room: RoomState, role: SpeakerRole) => {
-        if (roomKeys.length === 0) {
-            return null;
-        }
-
-        const keySlot = role === 'userA' ? 'geminiKeyA' : 'geminiKeyB';
-        const analysisKey = room[keySlot] ?? reserveLeastLoadedKey(false);
-        const aiInstance = analysisKey ? getAiInstance(analysisKey as string) : null;
-        if (!aiInstance) {
-            return null;
-        }
-
-        const session = new SpeakerSession(
-            aiInstance,
-            // onFeedback: called when Gemini returns parsed JSON coaching feedback
-            (feedback) => {
-                emitToParticipant(room, role, 'room-debug', {
-                    type: 'gemini-transcript',
-                    transcript: feedback.transcript,
-                    hasCorrection: Boolean(feedback.correction),
-                    hasPronunciationTip: Boolean(feedback.pronunciationTip),
-                    createdAt: new Date().toISOString(),
-                });
-
-                // Emit live transcript entry whenever Gemini returns transcript in feedback
-                if (feedback.transcript) {
-                    emitTranscript(room, role, feedback.transcript);
-                }
-
-                // Emit AI feedback to client if there's meaningful content
-                if (feedback.transcript || feedback.correction || feedback.pronunciationTip || feedback.interruptTip) {
-                    if (role === 'userA') {
-                        room.lastFeedbackA = feedback;
-                    } else {
-                        room.lastFeedbackB = feedback;
-                    }
-                    emitToParticipant(room, role, 'ai-feedback', {
-                        transcript: feedback.transcript,
-                        correction: feedback.correction,
-                        pronunciationTip: feedback.pronunciationTip,
-                        rows: feedback.rows ?? [],
-                        createdAt: new Date().toISOString(),
-                    });
-                }
-
-                if (feedback.interruptTip) {
-                    emitToParticipant(room, role, 'ai-tip', {
-                        tip: feedback.interruptTip,
-                        createdAt: new Date().toISOString(),
-                    });
-                }
-            },
-            // onTranscript: called when Gemini returns live inputAudioTranscription text
-            (transcript) => {
-                emitToParticipant(room, role, 'room-debug', {
-                    type: 'gemini-transcript',
-                    transcript,
-                    createdAt: new Date().toISOString(),
-                });
-                emitTranscript(room, role, transcript);
-            },
-            // onStatus: called when session state changes
-            (status) => {
-                emitToParticipant(room, role, 'room-debug', {
-                    type: 'gemini-status',
-                    status,
-                    createdAt: new Date().toISOString(),
-                });
-                emitToParticipant(room, role, 'coach-status', { status });
-            },
-            () => {
-                const key = room[keySlot];
-                room[keySlot] = null;
-                releaseKey(key);
-            },
-        );
-
-        await session.connect();
-        return session;
-    };
-
-    const decodeBase64 = (base64: string) => Buffer.from(base64, 'base64');
-
     const pcmChunksToWavBase64 = (chunks: string[]) => {
-        const pcmData = Buffer.concat(chunks.map(decodeBase64));
+        const pcmData = Buffer.concat(chunks.map(chunk => Buffer.from(chunk, 'base64')));
         const header = Buffer.alloc(44);
         const sampleRate = 16000;
         const channels = 1;
@@ -630,7 +345,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
 
         return rows
             .map((row) => {
-                const item = row as Partial<PronunciationFeedbackRow>;
+                const item = (row && typeof row === 'object' ? row : {}) as Partial<PronunciationFeedbackRow>;
                 return {
                     word: typeof item.word === 'string' ? item.word.trim() : '',
                     userPronunciation: typeof item.userPronunciation === 'string' ? item.userPronunciation.trim() : '',
@@ -643,8 +358,11 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             .slice(0, 5);
     };
 
+    const analysisQueues = new Map<string, Promise<void>>();
+
     const analyzeBufferedAudio = async (room: RoomState, role: SpeakerRole) => {
         const chunks = getAudioBuffer(room, role);
+        setAudioBuffer(room, role, []);
         if (!ANALYSIS_MODEL || chunks.length === 0) {
             setAudioBuffer(room, role, []);
             if (!ANALYSIS_MODEL) {
@@ -672,6 +390,13 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             return;
         }
 
+        const queueKey = `${room.roomId}:${role}`;
+        if (analysisQueues.has(queueKey)) return;
+        const previous = Promise.resolve();
+        let finish!: () => void;
+        const current = new Promise<void>(resolve => { finish = resolve; });
+        analysisQueues.set(queueKey, current);
+        await previous;
         try {
             emitToParticipant(room, role, 'room-debug', {
                 type: 'gemini-status',
@@ -715,6 +440,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 rows: sanitizeRows(parsed.rows),
             };
 
+            if (!rooms.has(room.roomId)) return;
             const signatureKey = role === 'userA' ? 'lastFeedbackSignatureA' : 'lastFeedbackSignatureB';
             const signature = JSON.stringify({
                 transcript: feedback.transcript,
@@ -762,36 +488,13 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             console.error('[ConversationRoom] Failed to analyze buffered audio', error);
             emitToParticipant(room, role, 'room-debug', {
                 type: 'gemini-status',
-                status: 'Gemini analysis failed',
+                status: 'Coaching unavailable. Check the server API key and analysis model.',
                 createdAt: new Date().toISOString(),
             });
         } finally {
-            setAudioBuffer(room, role, []);
+            finish();
+            if (analysisQueues.get(queueKey) === current) analysisQueues.delete(queueKey);
         }
-    };
-
-    const ensureSpeakerSession = async (room: RoomState, role: SpeakerRole) => {
-        const sessionKey = role === 'userA' ? 'geminiSessionA' : 'geminiSessionB';
-        const promiseKey = role === 'userA' ? 'geminiSessionPromiseA' : 'geminiSessionPromiseB';
-
-        if (room[sessionKey]) {
-            return room[sessionKey];
-        }
-
-        if (room[promiseKey]) {
-            return room[promiseKey];
-        }
-
-        room[promiseKey] = createSpeakerSession(room, role)
-            .then((session) => {
-                room[sessionKey] = session;
-                return session;
-            })
-            .finally(() => {
-                room[promiseKey] = null;
-            });
-
-        return room[promiseKey];
     };
 
     const finalizeRoom = async (room: RoomState) => {
@@ -814,12 +517,14 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             roomId: room.roomId,
             role: 'userA',
             selfLabel: room.userA.label,
+            reconnectToken: room.userA.reconnectToken,
             partnerLabel: room.userB.label,
         });
         secondSocket.emit('room-ready', {
             roomId: room.roomId,
             role: 'userB',
             selfLabel: room.userB.label,
+            reconnectToken: room.userB.reconnectToken,
             partnerLabel: room.userA.label,
         });
 
@@ -830,7 +535,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             return;
         }
 
-        if (!LIVE_MODEL || !ANALYSIS_MODEL) {
+        if (!ANALYSIS_MODEL) {
             io.to(room.roomId).emit('coach-status', { status: 'Gemini model missing' });
             return;
         }
@@ -858,10 +563,6 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             roomId,
             userA: creator,
             userB: null,
-            geminiSessionA: null,
-            geminiSessionB: null,
-            geminiSessionPromiseA: null,
-            geminiSessionPromiseB: null,
             geminiKeyA: null,
             geminiKeyB: null,
             lastFeedbackA: null,
@@ -917,6 +618,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 shareUrl: `${frontendBaseUrl}/rooms?room=${encodeURIComponent(room.roomId)}`,
                 role: 'userA',
                 selfLabel: room.userA.label,
+            reconnectToken: room.userA.reconnectToken,
             });
             socket.emit('call-status', { status: 'Invite link ready. Waiting for your friend...' });
         });
@@ -949,7 +651,7 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             await finalizeRoom(room);
         });
 
-        socket.on('rejoin-room', async ({ roomId, role, name }: { roomId?: string; role?: SpeakerRole; name?: string } = {}) => {
+        socket.on('rejoin-room', async ({ roomId, role, name, reconnectToken }: { roomId?: string; role?: SpeakerRole; name?: string; reconnectToken?: string } = {}) => {
             if (!roomId || !role) {
                 return;
             }
@@ -960,6 +662,11 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 return;
             }
 
+            const participant = role === 'userA' ? room.userA : role === 'userB' ? room.userB : null;
+            if (!participant || !reconnectToken || participant.reconnectToken !== reconnectToken || roomBySocket.has(socket.id)) {
+                emitRoomError(socket, 'Unable to restore this participant. Join with a new invite.');
+                return;
+            }
             await restoreMembership(socket, room, role, name);
         });
 
@@ -992,20 +699,13 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 return;
             }
 
-            const mimeType = payload.pcmMimeType ?? 'audio/pcm;rate=16000';
-            setAudioBuffer(room, role, [...getAudioBuffer(room, role), payload.pcmData]);
-            const session = await ensureSpeakerSession(room, role);
-            emitToParticipant(room, role, 'room-debug', {
-                type: 'audio-sent',
-                createdAt: new Date().toISOString(),
+            // PCM frames are independently playable; MediaRecorder fragments are not.
+            if (typeof payload.pcmData !== 'string' || payload.pcmData.length > 24000) return;
+            if (partner) io.to(partner.socketId).emit('partner-audio', {
+                audio: payload.pcmData, mimeType: 'audio/pcm;rate=16000',
             });
-            const sent = session?.sendAudio(payload.pcmData, mimeType);
-            if (sent) {
-                emitToParticipant(room, role, 'room-debug', {
-                    type: 'gemini-audio-received',
-                    createdAt: new Date().toISOString(),
-                });
-            }
+            const chunks = getAudioBuffer(room, role);
+            if (chunks.length < 80) chunks.push(payload.pcmData); // ~20 seconds, bounded memory
         });
 
         socket.on('audio-stream-end', async () => {
@@ -1024,8 +724,6 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
                 return;
             }
 
-            const session = await ensureSpeakerSession(room, participant.role);
-            session?.endAudioTurn();
             await analyzeBufferedAudio(room, participant.role);
         });
 
@@ -1158,4 +856,5 @@ export function setupConversationRoomServer(server: HttpServer, allowedOrigins: 
             }
         });
     });
+    return io;
 }
